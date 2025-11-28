@@ -45,7 +45,7 @@ const Advisor: React.FC<AdvisorProps> = ({ transactions, categories }) => {
 
   return (
     <div className="flex flex-col h-full animate-slide-up pb-24">
-      
+
       {/* Messages Area */}
       <div className="flex-1 overflow-y-auto space-y-6 pr-2 mb-4 scroll-smooth">
         

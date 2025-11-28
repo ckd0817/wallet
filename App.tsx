@@ -239,12 +239,12 @@ const App: React.FC = () => {
       </header>
 
       {/* Main Content */}
-      <main className="max-w-2xl mx-auto p-4 pb-32 min-h-screen animate-fade-in">
+      <main className="max-w-2xl mx-auto p-4 pb-20 min-h-screen animate-fade-in" style={{paddingBottom: 'calc(5rem + env(safe-area-inset-bottom))'}}>
         {renderContent()}
       </main>
 
       {/* Minimalist Tab Bar */}
-      <nav className="fixed bottom-0 left-0 right-0 z-40 bg-background/90 backdrop-blur-lg border-t border-border pb-safe">
+      <nav className="fixed bottom-0 left-0 right-0 z-40 bg-background/90 backdrop-blur-lg border-t border-border" style={{paddingBottom: 'env(safe-area-inset-bottom)'}}>
         <div className="max-w-2xl mx-auto grid grid-cols-5 h-16 items-center">
           
           <NavButton 

@@ -55,7 +55,7 @@ const Dashboard: React.FC<DashboardProps> = ({ transactions, categories, onDelet
 
   return (
     <div className="flex flex-col h-full animate-slide-up">
-      
+
       {/* Month Header - Minimalist */}
       <div className="flex items-center justify-between mb-8 px-2">
          {/* Left: Date (Interactive) */}
