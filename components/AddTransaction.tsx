@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
-import { X, Check, Calendar, Plus, ChevronLeft, Repeat } from 'lucide-react';
-import { TransactionType, Category, RecurringFrequency } from '../types';
+import React, { useState, useEffect } from 'react';
+import { X, Check, Calendar, Plus, ChevronLeft, Repeat, Pencil } from 'lucide-react';
+import { TransactionType, Category, RecurringFrequency, Transaction } from '../types';
 import { getIconComponent, COLORS } from '../constants';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -8,12 +8,23 @@ interface AddTransactionProps {
   isOpen: boolean;
   onClose: () => void;
   onAdd: (data: any) => void;
+  onUpdate?: (id: string, data: any) => void;
   onAddRecurring?: (data: any) => void;
   categories: Category[];
   onAddCategory: (category: Category) => void;
+  editData?: Transaction | null;
 }
 
-const AddTransaction: React.FC<AddTransactionProps> = ({ isOpen, onClose, onAdd, onAddRecurring, categories, onAddCategory }) => {
+const AddTransaction: React.FC<AddTransactionProps> = ({ 
+  isOpen, 
+  onClose, 
+  onAdd, 
+  onUpdate,
+  onAddRecurring, 
+  categories, 
+  onAddCategory,
+  editData 
+}) => {
   const [type, setType] = useState<TransactionType>('expense');
   const [amount, setAmount] = useState('');
   const [categoryId, setCategoryId] = useState('');
@@ -27,6 +38,27 @@ const AddTransaction: React.FC<AddTransactionProps> = ({ isOpen, onClose, onAdd,
   const [newCatName, setNewCatName] = useState('');
   const [newCatColor, setNewCatColor] = useState(COLORS[0]);
 
+  // Load edit data when available
+  useEffect(() => {
+    if (editData && isOpen) {
+      setType(editData.type);
+      setAmount(editData.amount.toString());
+      setCategoryId(editData.categoryId);
+      setDate(editData.date);
+      setNote(editData.note || '');
+      setIsRecurring(false); // Disable recurring toggle when editing a specific transaction
+    } else if (isOpen) {
+      // Reset for new entry
+      setAmount('');
+      setNote('');
+      // Keep previous date/type potentially, or reset? Let's reset date to today
+      setDate(new Date().toISOString().split('T')[0]);
+      // setType('expense'); // Keep last used type might be better UX, but let's default expense
+      setCategoryId('');
+      setIsRecurring(false);
+    }
+  }, [editData, isOpen]);
+
   if (!isOpen) return null;
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -35,31 +67,37 @@ const AddTransaction: React.FC<AddTransactionProps> = ({ isOpen, onClose, onAdd,
     
     const numAmount = parseFloat(amount);
     
-    if (isRecurring && onAddRecurring) {
-        onAddRecurring({
-            amount: numAmount,
-            type,
-            categoryId,
-            note,
-            frequency,
-            startDate: date 
-        });
+    if (editData && onUpdate) {
+      // Update existing
+      onUpdate(editData.id, {
+        amount: numAmount,
+        type,
+        categoryId,
+        date,
+        note
+      });
     } else {
-        onAdd({
-            amount: numAmount,
-            type,
-            categoryId,
-            date,
-            note
-        });
+      // Create new
+      if (isRecurring && onAddRecurring) {
+          onAddRecurring({
+              amount: numAmount,
+              type,
+              categoryId,
+              note,
+              frequency,
+              startDate: date 
+          });
+      } else {
+          onAdd({
+              amount: numAmount,
+              type,
+              categoryId,
+              date,
+              note
+          });
+      }
     }
     
-    // Reset
-    setAmount('');
-    setNote('');
-    setCategoryId('');
-    setDate(new Date().toISOString().split('T')[0]);
-    setIsRecurring(false);
     onClose();
   };
 
@@ -115,13 +153,13 @@ const AddTransaction: React.FC<AddTransactionProps> = ({ isOpen, onClose, onAdd,
         {isCreatingCategory ? (
           // CREATE CATEGORY
           <div className="flex-1 p-8 flex flex-col gap-8">
-            <h2 className="text-2xl font-light">New Category</h2>
+            <h2 className="text-2xl font-light">新建分类</h2>
             <input
                   type="text"
                   autoFocus
                   value={newCatName}
                   onChange={(e) => setNewCatName(e.target.value)}
-                  placeholder="Category Name"
+                  placeholder="分类名称"
                   className="w-full text-3xl font-bold border-b border-border pb-2 focus:border-primary placeholder-zinc-200 outline-none"
             />
             
@@ -141,13 +179,21 @@ const AddTransaction: React.FC<AddTransactionProps> = ({ isOpen, onClose, onAdd,
                 disabled={!newCatName.trim()}
                 className="mt-auto w-full bg-primary text-white py-4 rounded-xl font-bold"
             >
-                Create
+                创建
             </button>
           </div>
         ) : (
-          // ADD TRANSACTION
+          // ADD / EDIT TRANSACTION
           <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto px-6 pb-6 space-y-8">
             
+            {/* Title Indicator if Editing */}
+            {editData && (
+              <div className="flex items-center justify-center -mb-4 text-xs font-medium text-secondary gap-1">
+                 <Pencil className="w-3 h-3" />
+                 <span>正在编辑</span>
+              </div>
+            )}
+
             {/* Huge Amount Input */}
             <div className="flex flex-col items-center justify-center py-4">
                <div className="flex items-baseline gap-1 text-primary">
@@ -167,7 +213,7 @@ const AddTransaction: React.FC<AddTransactionProps> = ({ isOpen, onClose, onAdd,
 
             {/* Category Grid */}
             <div>
-               <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-3 block">Category</label>
+               <label className="text-xs font-bold text-zinc-400 uppercase tracking-wider mb-3 block">分类</label>
                <div className="grid grid-cols-4 gap-4">
                   {filteredCategories.map(cat => {
                       const Icon = getIconComponent(cat.icon);
@@ -200,7 +246,7 @@ const AddTransaction: React.FC<AddTransactionProps> = ({ isOpen, onClose, onAdd,
                       <div className="w-12 h-12 rounded-2xl flex items-center justify-center bg-surface border border-dashed border-zinc-400 text-zinc-400">
                           <Plus className="w-5 h-5" />
                       </div>
-                      <span className="text-[10px] font-medium text-primary">Add</span>
+                      <span className="text-[10px] font-medium text-primary">添加</span>
                   </button>
                </div>
             </div>
@@ -228,21 +274,23 @@ const AddTransaction: React.FC<AddTransactionProps> = ({ isOpen, onClose, onAdd,
                   </div>
                </div>
 
-               {/* Recurring Toggle - Minimal */}
-               <div className="flex items-center justify-between bg-surface p-3 rounded-xl border border-border">
-                   <div className="flex items-center gap-2 text-sm font-medium text-primary">
-                       <Repeat className="w-4 h-4" />
-                       <span>周期重复</span>
-                   </div>
-                   <input 
-                       type="checkbox" 
-                       checked={isRecurring}
-                       onChange={(e) => setIsRecurring(e.target.checked)}
-                       className="w-5 h-5 accent-primary"
-                   />
-               </div>
+               {/* Recurring Toggle - Only show if not editing existing (simplified logic) */}
+               {!editData && (
+                 <div className="flex items-center justify-between bg-surface p-3 rounded-xl border border-border">
+                     <div className="flex items-center gap-2 text-sm font-medium text-primary">
+                         <Repeat className="w-4 h-4" />
+                         <span>周期重复</span>
+                     </div>
+                     <input 
+                         type="checkbox" 
+                         checked={isRecurring}
+                         onChange={(e) => setIsRecurring(e.target.checked)}
+                         className="w-5 h-5 accent-primary"
+                     />
+                 </div>
+               )}
                
-               {isRecurring && (
+               {isRecurring && !editData && (
                    <div className="grid grid-cols-4 gap-2">
                        {(['daily', 'weekly', 'monthly', 'yearly'] as RecurringFrequency[]).map(freq => (
                            <button
@@ -255,7 +303,7 @@ const AddTransaction: React.FC<AddTransactionProps> = ({ isOpen, onClose, onAdd,
                                    : 'bg-white text-secondary border-border'
                                }`}
                            >
-                               {freq}
+                               {freq === 'daily' ? '每天' : freq === 'weekly' ? '每周' : freq === 'monthly' ? '每月' : '每年'}
                            </button>
                        ))}
                    </div>
@@ -267,7 +315,7 @@ const AddTransaction: React.FC<AddTransactionProps> = ({ isOpen, onClose, onAdd,
                 className="w-full bg-primary text-white py-4 rounded-xl font-bold text-lg hover:bg-zinc-800 active:scale-95 transition-all flex items-center justify-center gap-2"
             >
                 <Check className="w-5 h-5" />
-                <span>Save</span>
+                <span>{editData ? '更新' : '保存'}</span>
             </button>
           </form>
         )}

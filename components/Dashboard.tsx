@@ -7,9 +7,10 @@ interface DashboardProps {
   transactions: Transaction[];
   categories: Category[];
   onDelete: (id: string) => void;
+  onEdit: (transaction: Transaction) => void;
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ transactions, categories, onDelete }) => {
+const Dashboard: React.FC<DashboardProps> = ({ transactions, categories, onDelete, onEdit }) => {
   const [currentDate, setCurrentDate] = useState(new Date());
 
   const changeMonth = (increment: number) => {
@@ -137,7 +138,11 @@ const Dashboard: React.FC<DashboardProps> = ({ transactions, categories, onDelet
                                 const category = getCategory(t.categoryId);
                                 const Icon = getIconComponent(category?.icon || 'MoreHorizontal');
                                 return (
-                                    <div key={t.id} className="px-3 py-1 flex items-center justify-between group/item">
+                                    <div 
+                                      key={t.id} 
+                                      onClick={() => onEdit(t)}
+                                      className="px-3 py-2 flex items-center justify-between group/item cursor-pointer hover:bg-surface rounded-lg transition-colors -mx-2 relative"
+                                    >
                                         <div className="flex items-center gap-4 overflow-hidden">
                                             {/* Minimalist Icon: Just the icon, no background container, or very subtle */}
                                             <div className="text-primary opacity-80">
@@ -145,18 +150,25 @@ const Dashboard: React.FC<DashboardProps> = ({ transactions, categories, onDelet
                                             </div>
                                             <div className="min-w-0 flex flex-col">
                                                 <p className="text-sm font-medium text-primary truncate">{category?.name}</p>
-                                                {t.note && <p className="text-[10px] text-zinc-400 truncate max-w-[150px]">{t.note}</p>}
+                                                {t.note && <p className="text-[10px] text-zinc-400 truncate max-w-[120px]">{t.note}</p>}
                                             </div>
                                         </div>
-                                        <div className="flex items-center gap-4">
+                                        <div className="flex items-center gap-3">
                                             <span className={`font-medium text-sm tabular-nums tracking-tight ${
                                                 t.type === 'income' ? 'text-success' : 'text-primary'
                                             }`}>
                                                 {t.type === 'income' ? '+' : '-'} {t.amount.toFixed(2)}
                                             </span>
+                                            
+                                            {/* Delete Button: Hidden by default (opacity-0), shown on hover/group-hover */}
                                             <button 
-                                                onClick={() => onDelete(t.id)}
-                                                className="text-zinc-200 hover:text-danger transition-colors opacity-0 group-hover/item:opacity-100"
+                                                onClick={(e) => {
+                                                  // Critical: Stop propagation to prevent editing modal from opening
+                                                  e.stopPropagation();
+                                                  onDelete(t.id);
+                                                }}
+                                                // Added z-10 to ensure it sits on top of the row click area
+                                                className="w-8 h-8 flex items-center justify-center bg-danger text-white rounded-lg shadow-sm hover:scale-105 active:scale-95 transition-all ml-1 shrink-0 opacity-0 group-hover/item:opacity-100 z-10"
                                             >
                                                 <Trash2 className="w-4 h-4" />
                                             </button>

@@ -13,6 +13,7 @@ import Settings from './components/Settings';
 const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<AppTab>(AppTab.DASHBOARD);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [categories, setCategories] = useState<Category[]>(DEFAULT_CATEGORIES);
@@ -118,6 +119,20 @@ const App: React.FC = () => {
     setTransactions(prev => [newTransaction, ...prev]);
   };
 
+  const handleUpdateTransaction = (id: string, data: Partial<Transaction>) => {
+    setTransactions(prev => prev.map(t => t.id === id ? { ...t, ...data } : t));
+  };
+
+  const handleEditRequest = (transaction: Transaction) => {
+    setEditingTransaction(transaction);
+    setIsAddModalOpen(true);
+  };
+
+  const handleCloseAddModal = () => {
+    setIsAddModalOpen(false);
+    setEditingTransaction(null);
+  };
+
   const handleAddRecurring = (data: Omit<RecurringProfile, 'id' | 'nextDueDate'>) => {
     const newProfile: RecurringProfile = {
       id: uuidv4(),
@@ -169,7 +184,14 @@ const App: React.FC = () => {
   const renderContent = () => {
     switch (activeTab) {
       case AppTab.DASHBOARD:
-        return <Dashboard transactions={transactions} categories={categories} onDelete={handleDeleteTransaction} />;
+        return (
+          <Dashboard 
+            transactions={transactions} 
+            categories={categories} 
+            onDelete={handleDeleteTransaction}
+            onEdit={handleEditRequest} 
+          />
+        );
       case AppTab.STATS:
         return <Stats transactions={transactions} categories={categories} />;
       case AppTab.ADVISOR:
@@ -185,7 +207,14 @@ const App: React.FC = () => {
             />
         );
       default:
-        return <Dashboard transactions={transactions} categories={categories} onDelete={handleDeleteTransaction} />;
+        return (
+          <Dashboard 
+            transactions={transactions} 
+            categories={categories} 
+            onDelete={handleDeleteTransaction}
+            onEdit={handleEditRequest}
+          />
+        );
     }
   };
 
@@ -233,7 +262,10 @@ const App: React.FC = () => {
           {/* Center Add Button */}
           <div className="relative flex items-center justify-center">
              <button
-                onClick={() => setIsAddModalOpen(true)}
+                onClick={() => {
+                  setEditingTransaction(null);
+                  setIsAddModalOpen(true);
+                }}
                 className="absolute -top-6 w-14 h-14 bg-primary text-white rounded-full shadow-lg shadow-zinc-200 flex items-center justify-center hover:scale-105 active:scale-95 transition-all"
              >
                 <Plus className="w-7 h-7" />
@@ -256,11 +288,13 @@ const App: React.FC = () => {
 
       <AddTransaction
         isOpen={isAddModalOpen}
-        onClose={() => setIsAddModalOpen(false)}
+        onClose={handleCloseAddModal}
         onAdd={handleAddTransaction}
+        onUpdate={handleUpdateTransaction}
         onAddRecurring={handleAddRecurring}
         categories={categories}
         onAddCategory={handleAddCategory}
+        editData={editingTransaction}
       />
     </div>
   );

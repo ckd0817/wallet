@@ -22,7 +22,7 @@ const Settings: React.FC<SettingsProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
   
   // AI Config
-  const [aiConfig, setAiConfig] = useState({ apiKey: '', baseUrl: 'https://api.openai.com/v1', model: 'gpt-3.5-turbo' });
+  const [aiConfig, setAiConfig] = useState({ apiKey: '', baseUrl: '', model: '' });
   const [aiSaved, setAiSaved] = useState(false);
 
   // Export/Import
@@ -139,7 +139,7 @@ const Settings: React.FC<SettingsProps> = ({
                       <Globe className="w-4 h-4 text-secondary" />
                       <input 
                         className="flex-1 text-sm bg-transparent placeholder-zinc-300"
-                        placeholder="接口地址 (Base URL)"
+                        placeholder="接口地址"
                         value={aiConfig.baseUrl}
                         onChange={e => setAiConfig({...aiConfig, baseUrl: e.target.value})}
                       />
@@ -149,7 +149,7 @@ const Settings: React.FC<SettingsProps> = ({
                       <input 
                         className="flex-1 text-sm bg-transparent placeholder-zinc-300"
                         type="password"
-                        placeholder="API 密钥 (sk-...)"
+                        placeholder="API 密钥"
                         value={aiConfig.apiKey}
                         onChange={e => setAiConfig({...aiConfig, apiKey: e.target.value})}
                       />
@@ -158,7 +158,7 @@ const Settings: React.FC<SettingsProps> = ({
                       <Cpu className="w-4 h-4 text-secondary" />
                       <input 
                         className="flex-1 text-sm bg-transparent placeholder-zinc-300"
-                        placeholder="模型名称 (例如 gpt-4)"
+                        placeholder="模型名称"
                         value={aiConfig.model}
                         onChange={e => setAiConfig({...aiConfig, model: e.target.value})}
                       />
