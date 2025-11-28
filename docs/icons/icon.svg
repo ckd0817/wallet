@@ -1,0 +1,26 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- 背景 -->
+  <rect width="512" height="512" rx="120" fill="#09090b"/>
+
+  <!-- 钱包主体 -->
+  <path d="M128 160C128 142.327 142.327 128 160 128H352C369.673 128 384 142.327 384 160V192H128V160Z" fill="white" fill-opacity="0.95"/>
+  <path d="M128 192H384V352C384 369.673 369.673 384 352 384H160C142.327 384 128 369.673 128 352V192Z" fill="white" fill-opacity="0.9"/>
+
+  <!-- 钱包细节线条 -->
+  <rect x="148" y="160" width="216" height="8" rx="4" fill="#09090b" fill-opacity="0.2"/>
+  <rect x="148" y="176" width="180" height="6" rx="3" fill="#09090b" fill-opacity="0.15"/>
+
+  <!-- 智能标记圆圈 -->
+  <circle cx="320" cy="280" r="36" fill="#10b981" fill-opacity="0.95"/>
+
+  <!-- 对勾符号 -->
+  <path d="M305 280L315 290L335 270" stroke="white" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- 装饰点 -->
+  <circle cx="160" cy="360" r="4" fill="#10b981" fill-opacity="0.6"/>
+  <circle cx="180" cy="360" r="4" fill="#10b981" fill-opacity="0.6"/>
+  <circle cx="200" cy="360" r="4" fill="#10b981" fill-opacity="0.6"/>
+
+  <!-- 高光效果 -->
+  <ellipse cx="256" cy="100" rx="120" ry="40" fill="white" fill-opacity="0.1"/>
+</svg>
