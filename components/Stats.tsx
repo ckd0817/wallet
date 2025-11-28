@@ -148,7 +148,7 @@ const Stats: React.FC<StatsProps> = ({ transactions, categories }) => {
         return acc;
       }, {} as Record<string, { name: string; value: number; color: string }>);
 
-      return Object.values(agg).sort((a, b) => b.value - a.value);
+      return (Object.values(agg) as { name: string; value: number; color: string }[]).sort((a, b) => b.value - a.value);
   }, [currentPeriodData, chartType, categories]);
 
   return (
