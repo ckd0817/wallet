@@ -44,16 +44,16 @@ const Advisor: React.FC<AdvisorProps> = ({ transactions, categories }) => {
   };
 
   return (
-    <div className="flex flex-col h-full animate-slide-up pb-20">
+    <div className="flex flex-col h-full animate-slide-up pb-24">
       
       {/* Messages Area */}
       <div className="flex-1 overflow-y-auto space-y-6 pr-2 mb-4 scroll-smooth">
         
         {/* Intro */}
-        <div className="flex justify-center py-6">
-           <div className="bg-surface border border-border px-4 py-2 rounded-full flex items-center gap-2">
-              <Sparkles className="w-4 h-4 text-primary" />
-              <span className="text-xs font-medium text-secondary">AI 财务顾问</span>
+        <div className="flex justify-center py-8">
+           <div className="bg-surface border border-border px-5 py-2.5 rounded-full flex items-center gap-2">
+              <Sparkles className="w-5 h-5 text-primary" />
+              <span className="text-sm font-medium text-secondary">AI 财务顾问</span>
            </div>
         </div>
 
@@ -63,7 +63,7 @@ const Advisor: React.FC<AdvisorProps> = ({ transactions, categories }) => {
             className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}
           >
             <div
-              className={`max-w-[85%] px-4 py-3 text-sm leading-relaxed tracking-wide ${
+              className={`max-w-[85%] px-5 py-4 text-base leading-relaxed tracking-wide ${
                 msg.role === 'user'
                   ? 'bg-primary text-white rounded-2xl rounded-tr-sm'
                   : 'bg-surface border border-border text-primary rounded-2xl rounded-tl-sm'
@@ -71,7 +71,7 @@ const Advisor: React.FC<AdvisorProps> = ({ transactions, categories }) => {
             >
               <div className="whitespace-pre-wrap">{msg.content}</div>
             </div>
-            <span className="text-[10px] text-zinc-300 mt-1 px-1">
+            <span className="text-xs text-zinc-300 mt-1.5 px-2">
                 {msg.role === 'user' ? '你' : '智能顾问'}
             </span>
           </div>
@@ -79,10 +79,10 @@ const Advisor: React.FC<AdvisorProps> = ({ transactions, categories }) => {
         
         {loading && (
           <div className="flex items-start">
-             <div className="bg-surface border border-border px-4 py-3 rounded-2xl rounded-tl-sm flex gap-1">
-                <span className="w-1.5 h-1.5 bg-zinc-400 rounded-full animate-bounce"></span>
-                <span className="w-1.5 h-1.5 bg-zinc-400 rounded-full animate-bounce delay-75"></span>
-                <span className="w-1.5 h-1.5 bg-zinc-400 rounded-full animate-bounce delay-150"></span>
+             <div className="bg-surface border border-border px-5 py-4 rounded-2xl rounded-tl-sm flex gap-1.5">
+                <span className="w-2 h-2 bg-zinc-400 rounded-full animate-bounce"></span>
+                <span className="w-2 h-2 bg-zinc-400 rounded-full animate-bounce delay-75"></span>
+                <span className="w-2 h-2 bg-zinc-400 rounded-full animate-bounce delay-150"></span>
              </div>
           </div>
         )}
@@ -97,14 +97,14 @@ const Advisor: React.FC<AdvisorProps> = ({ transactions, categories }) => {
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleAsk()}
           placeholder="输入消息..."
-          className="w-full bg-white border border-border text-primary rounded-xl py-4 pl-4 pr-14 focus:ring-1 focus:ring-primary focus:border-primary transition-all text-sm"
+          className="w-full bg-white border border-border text-primary rounded-2xl py-5 pl-5 pr-16 focus:ring-1 focus:ring-primary focus:border-primary transition-all text-base"
         />
         <button
           onClick={handleAsk}
           disabled={loading || !query.trim()}
-          className="absolute right-2 top-2 bottom-2 aspect-square bg-primary text-white rounded-lg hover:bg-zinc-800 disabled:opacity-50 disabled:hover:bg-primary transition-colors flex items-center justify-center"
+          className="absolute right-3 top-3 bottom-3 aspect-square bg-primary text-white rounded-xl hover:bg-zinc-800 disabled:opacity-50 disabled:hover:bg-primary transition-colors flex items-center justify-center"
         >
-          <Send className="w-4 h-4" />
+          <Send className="w-5 h-5" />
         </button>
       </div>
     </div>

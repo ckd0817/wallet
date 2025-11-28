@@ -60,8 +60,8 @@ const Dashboard: React.FC<DashboardProps> = ({ transactions, categories, onDelet
       <div className="flex items-center justify-between mb-8 px-2">
          {/* Left: Date (Interactive) */}
          <div className="relative group cursor-pointer">
-            <div className="text-3xl font-light tracking-tight text-primary whitespace-nowrap flex items-baseline gap-2 pointer-events-none">
-               {month}月 <span className="text-lg text-secondary font-normal">{year}</span>
+            <div className="text-4xl font-light tracking-tight text-primary whitespace-nowrap flex items-baseline gap-2 pointer-events-none">
+               {month}月 <span className="text-xl text-secondary font-normal">{year}</span>
             </div>
             {/* Invisible Date Picker Overlay */}
             <input 
@@ -83,24 +83,24 @@ const Dashboard: React.FC<DashboardProps> = ({ transactions, categories, onDelet
              {/* Stats */}
              <div className="flex gap-4 text-right">
                 <div className="flex flex-col items-end">
-                    <span className="text-[10px] text-secondary uppercase tracking-wider">支出</span>
-                    <span className="font-semibold text-primary text-sm">¥{monthlyData.stats.expense.toFixed(2)}</span>
+                    <span className="text-xs text-secondary uppercase tracking-wider">支出</span>
+                    <span className="font-semibold text-primary text-base">¥{monthlyData.stats.expense.toFixed(2)}</span>
                 </div>
                 <div className="flex flex-col items-end">
-                    <span className="text-[10px] text-secondary uppercase tracking-wider">收入</span>
-                    <span className="font-semibold text-primary text-sm">¥{monthlyData.stats.income.toFixed(2)}</span>
+                    <span className="text-xs text-secondary uppercase tracking-wider">收入</span>
+                    <span className="font-semibold text-primary text-base">¥{monthlyData.stats.income.toFixed(2)}</span>
                 </div>
              </div>
 
              <div className="w-[1px] h-8 bg-border hidden sm:block"></div>
 
              {/* Nav */}
-             <div className="flex gap-1 pl-2 border-l border-border sm:border-0 sm:pl-0">
-                 <button onClick={() => changeMonth(-1)} className="p-1.5 text-zinc-300 hover:text-primary transition-colors hover:bg-surface rounded-full">
-                     <ChevronLeft className="w-5 h-5" />
+             <div className="flex gap-2 pl-2 border-l border-border sm:border-0 sm:pl-0">
+                 <button onClick={() => changeMonth(-1)} className="p-2 text-zinc-400 hover:text-primary transition-colors hover:bg-surface rounded-full">
+                     <ChevronLeft className="w-6 h-6" />
                  </button>
-                 <button onClick={() => changeMonth(1)} className="p-1.5 text-zinc-300 hover:text-primary transition-colors hover:bg-surface rounded-full">
-                     <ChevronRight className="w-5 h-5" />
+                 <button onClick={() => changeMonth(1)} className="p-2 text-zinc-400 hover:text-primary transition-colors hover:bg-surface rounded-full">
+                     <ChevronRight className="w-6 h-6" />
                  </button>
              </div>
          </div>
@@ -110,8 +110,8 @@ const Dashboard: React.FC<DashboardProps> = ({ transactions, categories, onDelet
       <div className="flex-1 overflow-y-auto pb-24 space-y-8 scroll-smooth">
         {monthlyData.dates.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 text-zinc-300">
-              <Ban className="w-12 h-12 mb-4 opacity-20" />
-              <p className="font-light">本月无记录</p>
+              <Ban className="w-16 h-16 mb-4 opacity-20" />
+              <p className="font-light text-lg">本月无记录</p>
             </div>
         ) : (
             monthlyData.dates.map(dateKey => {
@@ -122,12 +122,12 @@ const Dashboard: React.FC<DashboardProps> = ({ transactions, categories, onDelet
 
                 return (
                     <div key={dateKey} className="group">
-                        <div className="flex items-end justify-between px-2 mb-3 border-b border-dashed border-border pb-1">
+                        <div className="flex items-end justify-between px-2 mb-4 border-b border-dashed border-border pb-2">
                             <div className="flex items-baseline gap-2">
-                                <span className="text-xl font-bold text-primary">{day}</span>
-                                <span className="text-xs text-secondary">{weekday}</span>
+                                <span className="text-2xl font-bold text-primary">{day}</span>
+                                <span className="text-sm text-secondary">{weekday}</span>
                             </div>
-                            <div className="text-[10px] text-zinc-400 font-mono">
+                            <div className="text-xs text-zinc-400 font-mono">
                                {dayData.dailyExpense > 0 && `-${dayData.dailyExpense.toFixed(0)} `}
                                {dayData.dailyIncome > 0 && `+${dayData.dailyIncome.toFixed(0)}`}
                             </div>
@@ -141,20 +141,19 @@ const Dashboard: React.FC<DashboardProps> = ({ transactions, categories, onDelet
                                     <div 
                                       key={t.id} 
                                       onClick={() => onEdit(t)}
-                                      className="px-3 py-2 flex items-center justify-between group/item cursor-pointer hover:bg-surface rounded-lg transition-colors -mx-2 relative"
+                                      className="px-3 py-3 flex items-center justify-between group/item cursor-pointer hover:bg-surface rounded-xl transition-colors -mx-2 relative"
                                     >
-                                        <div className="flex items-center gap-4 overflow-hidden">
-                                            {/* Minimalist Icon: Just the icon, no background container, or very subtle */}
+                                        <div className="flex items-center gap-5 overflow-hidden">
                                             <div className="text-primary opacity-80">
-                                                <Icon className="w-5 h-5" strokeWidth={1.5} />
+                                                <Icon className="w-6 h-6" strokeWidth={1.5} />
                                             </div>
-                                            <div className="min-w-0 flex flex-col">
-                                                <p className="text-sm font-medium text-primary truncate">{category?.name}</p>
-                                                {t.note && <p className="text-[10px] text-zinc-400 truncate max-w-[120px]">{t.note}</p>}
+                                            <div className="min-w-0 flex flex-col gap-0.5">
+                                                <p className="text-base font-medium text-primary truncate">{category?.name}</p>
+                                                {t.note && <p className="text-xs text-zinc-400 truncate max-w-[150px]">{t.note}</p>}
                                             </div>
                                         </div>
-                                        <div className="flex items-center gap-3">
-                                            <span className={`font-medium text-sm tabular-nums tracking-tight ${
+                                        <div className="flex items-center gap-4">
+                                            <span className={`font-medium text-base tabular-nums tracking-tight ${
                                                 t.type === 'income' ? 'text-success' : 'text-primary'
                                             }`}>
                                                 {t.type === 'income' ? '+' : '-'} {t.amount.toFixed(2)}
@@ -168,9 +167,10 @@ const Dashboard: React.FC<DashboardProps> = ({ transactions, categories, onDelet
                                                   onDelete(t.id);
                                                 }}
                                                 // Added z-10 to ensure it sits on top of the row click area
-                                                className="w-8 h-8 flex items-center justify-center bg-danger text-white rounded-lg shadow-sm hover:scale-105 active:scale-95 transition-all ml-1 shrink-0 opacity-0 group-hover/item:opacity-100 z-10"
+                                                // Re-added opacity-0 group-hover:opacity-100 logic
+                                                className="w-9 h-9 flex items-center justify-center bg-danger text-white rounded-lg shadow-sm hover:scale-105 active:scale-95 transition-all ml-1 shrink-0 opacity-0 group-hover/item:opacity-100 z-10"
                                             >
-                                                <Trash2 className="w-4 h-4" />
+                                                <Trash2 className="w-5 h-5" />
                                             </button>
                                         </div>
                                     </div>

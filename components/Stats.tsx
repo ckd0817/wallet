@@ -29,7 +29,6 @@ const Stats: React.FC<StatsProps> = ({ transactions, categories }) => {
         let end = new Date();
 
         if (viewMode === 'week') {
-            // Monday of the current week - i weeks
             const day = today.getDay() || 7; // 1-7
             d.setDate(today.getDate() - (day - 1) - (i * 7));
             start = new Date(d);
@@ -49,7 +48,7 @@ const Stats: React.FC<StatsProps> = ({ transactions, categories }) => {
             start.setHours(0,0,0,0);
             end = new Date(start);
             end.setMonth(end.getMonth() + 1);
-            end.setDate(0); // Last day of month
+            end.setDate(0); 
             end.setHours(23,59,59,999);
 
             label = i === 0 ? '本月' : `${d.getFullYear()}年${d.getMonth() + 1}月`;
@@ -72,7 +71,6 @@ const Stats: React.FC<StatsProps> = ({ transactions, categories }) => {
     return list;
   }, [viewMode]);
 
-  // Default select first period (latest) when mode changes
   useEffect(() => {
       if (periods.length > 0) {
           setSelectedPeriod(periods[0].value);
@@ -80,7 +78,7 @@ const Stats: React.FC<StatsProps> = ({ transactions, categories }) => {
       }
   }, [periods]);
 
-  // 2. Filter Transactions by Selected Period
+  // 2. Filter Transactions
   const currentPeriodData = useMemo(() => {
       const period = periods.find(p => p.value === selectedPeriod);
       if (!period) return { transactions: [], totalIncome: 0, totalExpense: 0, period: null };
@@ -96,35 +94,31 @@ const Stats: React.FC<StatsProps> = ({ transactions, categories }) => {
       return { transactions: filtered, totalIncome, totalExpense, period };
   }, [selectedPeriod, periods, transactions]);
 
-  // 3. Prepare Line Chart Data (Trend)
+  // 3. Trend Data
   const trendData = useMemo(() => {
       if (!currentPeriodData.period) return [];
       const { start, end } = currentPeriodData.period;
       const data: any[] = [];
       const isYearView = viewMode === 'year';
 
-      // Determine grouped keys (Days or Months)
       const map = new Map<string, { income: number; expense: number; label: string }>();
 
       if (isYearView) {
-          // Initialize 12 months
           for (let m = 0; m < 12; m++) {
               const d = new Date(start.getFullYear(), m, 1);
               const key = `${d.getFullYear()}-${m}`;
               map.set(key, { income: 0, expense: 0, label: `${m+1}月` });
           }
       } else {
-          // Initialize days in range
           const curr = new Date(start);
           while (curr <= end) {
               const key = curr.toISOString().split('T')[0];
-              const label = `${curr.getDate()}日`; // Simple label
+              const label = `${curr.getDate()}日`; 
               map.set(key, { income: 0, expense: 0, label });
               curr.setDate(curr.getDate() + 1);
           }
       }
 
-      // Fill data
       currentPeriodData.transactions.forEach(t => {
           const d = new Date(t.date);
           let key = '';
@@ -142,7 +136,7 @@ const Stats: React.FC<StatsProps> = ({ transactions, categories }) => {
       return data;
   }, [currentPeriodData, viewMode]);
 
-  // 4. Prepare Pie Chart Data (Category)
+  // 4. Category Data
   const categoryData = useMemo(() => {
       const filtered = currentPeriodData.transactions.filter(t => t.type === chartType);
       const agg = filtered.reduce((acc, t) => {
@@ -158,15 +152,15 @@ const Stats: React.FC<StatsProps> = ({ transactions, categories }) => {
   }, [currentPeriodData, chartType, categories]);
 
   return (
-    <div className="flex flex-col h-full animate-slide-up pb-24 space-y-6">
+    <div className="flex flex-col h-full animate-slide-up pb-24 space-y-8">
       
       {/* 1. Mode Switcher */}
-      <div className="flex bg-surface p-1 rounded-xl border border-border">
+      <div className="flex bg-surface p-1.5 rounded-2xl border border-border">
           {(['week', 'month', 'year'] as ViewMode[]).map(mode => (
               <button
                   key={mode}
                   onClick={() => setViewMode(mode)}
-                  className={`flex-1 py-1.5 text-xs font-semibold rounded-lg transition-all ${
+                  className={`flex-1 py-2 text-sm font-semibold rounded-xl transition-all ${
                       viewMode === mode 
                       ? 'bg-primary text-white shadow-sm' 
                       : 'text-secondary hover:text-primary'
@@ -177,7 +171,7 @@ const Stats: React.FC<StatsProps> = ({ transactions, categories }) => {
           ))}
       </div>
 
-      {/* 2. Scrollable Period Selector */}
+      {/* 2. Period Selector */}
       <div className="relative">
           <div 
             ref={scrollRef}
@@ -188,7 +182,7 @@ const Stats: React.FC<StatsProps> = ({ transactions, categories }) => {
                   <button
                       key={p.value}
                       onClick={() => setSelectedPeriod(p.value)}
-                      className={`flex-shrink-0 px-4 py-2 rounded-full text-xs font-medium border snap-start transition-all ${
+                      className={`flex-shrink-0 px-5 py-2.5 rounded-full text-sm font-medium border snap-start transition-all ${
                           selectedPeriod === p.value
                           ? 'bg-primary text-white border-primary'
                           : 'bg-white text-secondary border-border hover:border-zinc-400'
@@ -198,25 +192,25 @@ const Stats: React.FC<StatsProps> = ({ transactions, categories }) => {
                   </button>
               ))}
           </div>
-          <div className="absolute right-0 top-0 bottom-2 w-8 bg-gradient-to-l from-white to-transparent pointer-events-none"></div>
+          <div className="absolute right-0 top-0 bottom-2 w-10 bg-gradient-to-l from-white to-transparent pointer-events-none"></div>
       </div>
 
-      {/* 3. Overview Cards */}
+      {/* 3. Overview */}
       <div className="grid grid-cols-2 gap-4">
-          <div className="bg-white border border-border p-4 rounded-2xl">
-              <p className="text-[10px] text-secondary uppercase tracking-wider mb-1">总支出</p>
-              <p className="text-xl font-bold text-primary">¥{currentPeriodData.totalExpense.toFixed(2)}</p>
+          <div className="bg-white border border-border p-5 rounded-2xl">
+              <p className="text-xs text-secondary uppercase tracking-wider mb-2">总支出</p>
+              <p className="text-2xl font-bold text-primary">¥{currentPeriodData.totalExpense.toFixed(2)}</p>
           </div>
-          <div className="bg-white border border-border p-4 rounded-2xl">
-              <p className="text-[10px] text-secondary uppercase tracking-wider mb-1">总收入</p>
-              <p className="text-xl font-bold text-success">¥{currentPeriodData.totalIncome.toFixed(2)}</p>
+          <div className="bg-white border border-border p-5 rounded-2xl">
+              <p className="text-xs text-secondary uppercase tracking-wider mb-2">总收入</p>
+              <p className="text-2xl font-bold text-success">¥{currentPeriodData.totalIncome.toFixed(2)}</p>
           </div>
       </div>
 
-      {/* 4. Trend Chart (Area) */}
-      <div className="bg-white border border-border p-5 rounded-2xl">
-          <h3 className="text-sm font-semibold text-primary mb-4">收支趋势</h3>
-          <div className="h-48 w-full">
+      {/* 4. Trend Chart */}
+      <div className="bg-white border border-border p-6 rounded-2xl">
+          <h3 className="text-base font-semibold text-primary mb-5">收支趋势</h3>
+          <div className="h-56 w-full">
             <ResponsiveContainer width="100%" height="100%">
               <AreaChart data={trendData} margin={{ top: 5, right: 0, left: -20, bottom: 0 }}>
                 <defs>
@@ -232,12 +226,12 @@ const Stats: React.FC<StatsProps> = ({ transactions, categories }) => {
                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f4f4f5" />
                 <XAxis 
                     dataKey="label" 
-                    tick={{ fontSize: 10, fill: '#a1a1aa' }} 
+                    tick={{ fontSize: 11, fill: '#a1a1aa' }} 
                     axisLine={false} 
                     tickLine={false}
                     interval={viewMode === 'year' ? 1 : 'preserveStartEnd'}
                 />
-                <YAxis tick={{ fontSize: 10, fill: '#a1a1aa' }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fontSize: 11, fill: '#a1a1aa' }} axisLine={false} tickLine={false} />
                 <Tooltip 
                     contentStyle={{ borderRadius: '12px', border: '1px solid #e4e4e7', fontSize: '12px', boxShadow: 'none' }}
                 />
@@ -264,20 +258,20 @@ const Stats: React.FC<StatsProps> = ({ transactions, categories }) => {
           </div>
       </div>
 
-      {/* 5. Category Chart (Pie) */}
-      <div className="bg-white border border-border p-5 rounded-2xl">
-          <div className="flex items-center justify-between mb-4">
-             <h3 className="text-sm font-semibold text-primary">分类占比</h3>
-             <div className="flex bg-surface rounded-lg p-0.5 border border-border">
+      {/* 5. Category Chart */}
+      <div className="bg-white border border-border p-6 rounded-2xl">
+          <div className="flex items-center justify-between mb-6">
+             <h3 className="text-base font-semibold text-primary">分类占比</h3>
+             <div className="flex bg-surface rounded-lg p-1 border border-border">
                  <button 
                     onClick={() => setChartType('expense')}
-                    className={`px-3 py-1 text-[10px] rounded-md transition-all ${chartType === 'expense' ? 'bg-white shadow-sm text-primary font-bold' : 'text-secondary'}`}
+                    className={`px-4 py-1.5 text-xs rounded-md transition-all ${chartType === 'expense' ? 'bg-white shadow-sm text-primary font-bold' : 'text-secondary'}`}
                  >
                     支出
                  </button>
                  <button 
                     onClick={() => setChartType('income')}
-                    className={`px-3 py-1 text-[10px] rounded-md transition-all ${chartType === 'income' ? 'bg-white shadow-sm text-primary font-bold' : 'text-secondary'}`}
+                    className={`px-4 py-1.5 text-xs rounded-md transition-all ${chartType === 'income' ? 'bg-white shadow-sm text-primary font-bold' : 'text-secondary'}`}
                  >
                     收入
                  </button>
@@ -285,20 +279,20 @@ const Stats: React.FC<StatsProps> = ({ transactions, categories }) => {
           </div>
 
           {categoryData.length > 0 ? (
-            <div className="flex flex-col sm:flex-row gap-6 items-center">
-                <div className="h-48 w-48 relative shrink-0">
+            <div className="flex flex-col gap-8">
+                <div className="h-56 w-full relative">
                     <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
                         <Pie
                         data={categoryData}
                         cx="50%"
                         cy="50%"
-                        innerRadius={50}
-                        outerRadius={70}
+                        innerRadius={60}
+                        outerRadius={80}
                         paddingAngle={4}
                         dataKey="value"
                         stroke="none"
-                        cornerRadius={4}
+                        cornerRadius={6}
                         >
                         {categoryData.map((entry, index) => (
                             <Cell key={`cell-${index}`} fill={entry.color} />
@@ -311,38 +305,33 @@ const Stats: React.FC<StatsProps> = ({ transactions, categories }) => {
                     </PieChart>
                     </ResponsiveContainer>
                     <div className="absolute inset-0 flex items-center justify-center pointer-events-none flex-col">
-                        <span className="text-[10px] text-zinc-400">Total</span>
-                        <span className="text-sm font-bold text-primary">
+                        <span className="text-xs text-zinc-400 mb-1">Total</span>
+                        <span className="text-lg font-bold text-primary">
                             ¥{categoryData.reduce((sum, item) => sum + item.value, 0).toFixed(0)}
                         </span>
                     </div>
                 </div>
                 
-                <div className="flex-1 w-full grid grid-cols-1 gap-2">
-                    {categoryData.slice(0, 5).map((item) => (
-                        <div key={item.name} className="flex items-center justify-between text-xs w-full">
-                            <div className="flex items-center gap-2">
-                                <div className="w-2 h-2 rounded-full" style={{ backgroundColor: item.color }} />
+                <div className="flex flex-col gap-3">
+                    {categoryData.slice(0, 6).map((item) => (
+                        <div key={item.name} className="flex items-center justify-between text-sm w-full">
+                            <div className="flex items-center gap-3">
+                                <div className="w-3 h-3 rounded-full" style={{ backgroundColor: item.color }} />
                                 <span className="text-secondary">{item.name}</span>
                             </div>
-                            <div className="flex items-center gap-3">
+                            <div className="flex items-center gap-4">
                                 <span className="font-medium text-primary">¥{item.value.toFixed(0)}</span>
-                                <span className="text-[10px] text-zinc-300 w-8 text-right">
+                                <span className="text-xs text-zinc-400 w-10 text-right">
                                     {((item.value / (chartType === 'expense' ? currentPeriodData.totalExpense : currentPeriodData.totalIncome)) * 100).toFixed(0)}%
                                 </span>
                             </div>
                         </div>
                     ))}
-                    {categoryData.length > 5 && (
-                         <div className="text-[10px] text-zinc-400 text-center mt-1">
-                             还有 {categoryData.length - 5} 个分类...
-                         </div>
-                    )}
                 </div>
             </div>
           ) : (
-            <div className="h-40 flex items-center justify-center text-zinc-300 text-xs">
-                本周期暂无{chartType === 'expense' ? '支出' : '收入'}数据
+            <div className="h-48 flex items-center justify-center text-zinc-300 text-sm">
+                本周期暂无数据
             </div>
           )}
       </div>

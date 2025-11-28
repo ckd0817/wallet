@@ -233,7 +233,7 @@ const App: React.FC = () => {
       
       {/* Minimalist Header */}
       <header className="sticky top-0 z-30 bg-background/80 backdrop-blur-xl border-b border-border px-6 h-16 flex items-center justify-between transition-all">
-        <h1 className="text-xl font-bold tracking-tight text-primary">
+        <h1 className="text-2xl font-bold tracking-tight text-primary">
             {getHeaderTitle()}
         </h1>
       </header>
