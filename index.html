@@ -3,7 +3,34 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <title>SmartWallet</title>
+    <title>SmartWallet - 智能记账</title>
+
+    <!-- PWA Meta Tags -->
+    <meta name="description" content="个人财务管理应用，支持收支记录、数据统计和AI智能理财建议" />
+    <meta name="theme-color" content="#09090b" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="智能记账" />
+    <meta name="application-name" content="SmartWallet" />
+    <meta name="msapplication-TileColor" content="#09090b" />
+    <meta name="msapplication-config" content="/browserconfig.xml" />
+
+    <!-- PWA Manifest -->
+    <link rel="manifest" href="/manifest.json" />
+
+    <!-- Apple Touch Icons -->
+    <link rel="apple-touch-icon" href="/icons/icon-152x152.png" />
+    <link rel="apple-touch-icon" sizes="152x152" href="/icons/icon-152x152.png" />
+    <link rel="apple-touch-icon" sizes="144x144" href="/icons/icon-144x144.png" />
+    <link rel="apple-touch-icon" sizes="120x120" href="/icons/icon-120x120.png" />
+    <link rel="apple-touch-icon" sizes="114x114" href="/icons/icon-114x114.png" />
+    <link rel="apple-touch-icon" sizes="76x76" href="/icons/icon-76x76.png" />
+    <link rel="apple-touch-icon" sizes="72x72" href="/icons/icon-72x72.png" />
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" sizes="32x32" href="/icons/icon-32x32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/icons/icon-16x16.png" />
+    <link rel="shortcut icon" href="/favicon.ico" />
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
       tailwind.config = {
@@ -73,5 +100,103 @@
 </head>
   <body>
     <div id="root"></div>
+
+    <!-- Service Worker Registration -->
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js')
+            .then((registration) => {
+              console.log('SW registered: ', registration);
+
+              // 检查更新
+              registration.addEventListener('updatefound', () => {
+                const newWorker = registration.installing;
+                if (newWorker) {
+                  newWorker.addEventListener('statechange', () => {
+                    if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                      // 新的Service Worker可用，提示用户刷新
+                      if (confirm('发现新版本，是否立即更新？')) {
+                        newWorker.postMessage({ type: 'SKIP_WAITING' });
+                        window.location.reload();
+                      }
+                    }
+                  });
+                }
+              });
+            })
+            .catch((registrationError) => {
+              console.log('SW registration failed: ', registrationError);
+            });
+        });
+
+        // 处理Service Worker消息
+        navigator.serviceWorker.addEventListener('message', (event) => {
+          if (event.data && event.data.type === 'REFRESH_PAGE') {
+            window.location.reload();
+          }
+        });
+      }
+
+      // PWA安装提示
+      let deferredPrompt;
+      window.addEventListener('beforeinstallprompt', (e) => {
+        // 阻止默认安装提示
+        e.preventDefault();
+        deferredPrompt = e;
+
+        // 可以在这里显示自定义安装按钮
+        console.log('应用可以安装了');
+
+        // 自动显示安装提示（可选）
+        setTimeout(() => {
+          if (deferredPrompt && !localStorage.getItem('pwa-install-dismissed')) {
+            // 可以在这里添加自定义的安装提示UI
+            const installBanner = document.createElement('div');
+            installBanner.innerHTML = `
+              <div style="position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+                          background: #09090b; color: white; padding: 12px 20px;
+                          border-radius: 8px; z-index: 9999; display: flex; align-items: center; gap: 10px;
+                          box-shadow: 0 4px 12px rgba(0,0,0,0.3); font-size: 14px;">
+                <span>📱 将SmartWallet安装到主屏幕</span>
+                <button onclick="installPWA()" style="background: white; color: #09090b; border: none;
+                        padding: 6px 12px; border-radius: 4px; cursor: pointer; font-weight: bold;">
+                  安装
+                </button>
+                <button onclick="dismissInstall()" style="background: transparent; color: white; border: none;
+                        cursor: pointer; font-size: 16px;">✕</button>
+              </div>
+            `;
+            document.body.appendChild(installBanner);
+
+            window.installPWA = () => {
+              if (deferredPrompt) {
+                deferredPrompt.prompt();
+                deferredPrompt.userChoice.then((choiceResult) => {
+                  if (choiceResult.outcome === 'accepted') {
+                    console.log('用户接受了安装');
+                  } else {
+                    console.log('用户拒绝了安装');
+                  }
+                  deferredPrompt = null;
+                  installBanner.remove();
+                });
+              }
+            };
+
+            window.dismissInstall = () => {
+              localStorage.setItem('pwa-install-dismissed', 'true');
+              installBanner.remove();
+            };
+          }
+        }, 3000);
+      });
+
+      // 监听应用安装
+      window.addEventListener('appinstalled', (evt) => {
+        console.log('应用已安装到主屏幕');
+        localStorage.setItem('pwa-installed', 'true');
+      });
+    </script>
   </body>
 </html>

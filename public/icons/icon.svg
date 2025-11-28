@@ -1,0 +1,23 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- 背景 -->
+  <rect width="512" height="512" rx="120" fill="#09090b"/>
+
+  <!-- 钱包图标 -->
+  <path d="M128 160C128 142.3 142.3 128 160 128H352C369.7 128 384 142.3 384 160V192H128V160Z" fill="white" opacity="0.9"/>
+  <path d="M128 192H384V352C384 369.7 369.7 384 352 384H160C142.3 384 128 369.7 128 352V192Z" fill="white" opacity="0.8"/>
+
+  <!-- 钱包细节 -->
+  <rect x="128" y="224" width="256" height="16" fill="#09090b" opacity="0.3"/>
+  <rect x="128" y="256" width="180" height="8" rx="4" fill="#09090b" opacity="0.2"/>
+  <rect x="128" y="272" width="140" height="8" rx="4" fill="#09090b" opacity="0.2"/>
+  <rect x="128" y="288" width="160" height="8" rx="4" fill="#09090b" opacity="0.2"/>
+
+  <!-- 智能元素 -->
+  <circle cx="320" cy="280" r="32" fill="#10b981"/>
+  <path d="M308 280L316 288L332 272" stroke="white" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- 装饰性元素 -->
+  <circle cx="160" cy="360" r="4" fill="#10b981" opacity="0.6"/>
+  <circle cx="180" cy="360" r="4" fill="#10b981" opacity="0.6"/>
+  <circle cx="200" cy="360" r="4" fill="#10b981" opacity="0.6"/>
+</svg>
