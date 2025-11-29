@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Check, Calendar, Plus, ChevronLeft, Repeat, Pencil } from 'lucide-react';
+import { X, Check, Calendar, Plus, ChevronLeft, Repeat, Pencil, Trash2 } from 'lucide-react';
 import { TransactionType, Category, RecurringFrequency, Transaction } from '../types';
 import { getIconComponent, COLORS } from '../constants';
 import { v4 as uuidv4 } from 'uuid';
@@ -9,21 +9,23 @@ interface AddTransactionProps {
   onClose: () => void;
   onAdd: (data: any) => void;
   onUpdate?: (id: string, data: any) => void;
+  onDelete?: (id: string) => void;
   onAddRecurring?: (data: any) => void;
   categories: Category[];
   onAddCategory: (category: Category) => void;
   editData?: Transaction | null;
 }
 
-const AddTransaction: React.FC<AddTransactionProps> = ({ 
-  isOpen, 
-  onClose, 
-  onAdd, 
+const AddTransaction: React.FC<AddTransactionProps> = ({
+  isOpen,
+  onClose,
+  onAdd,
   onUpdate,
-  onAddRecurring, 
-  categories, 
+  onDelete,
+  onAddRecurring,
+  categories,
   onAddCategory,
-  editData 
+  editData
 }) => {
   const [type, setType] = useState<TransactionType>('expense');
   const [amount, setAmount] = useState('');
@@ -107,6 +109,13 @@ const AddTransaction: React.FC<AddTransactionProps> = ({
     setCategoryId(newCat.id);
     setIsCreatingCategory(false);
     setNewCatName('');
+  };
+
+  const handleDelete = () => {
+    if (editData && onDelete) {
+      onDelete(editData.id);
+      onClose();
+    }
   };
 
   const filteredCategories = categories.filter(c => c.type === type);
@@ -197,7 +206,7 @@ const AddTransaction: React.FC<AddTransactionProps> = ({
                       required
                       value={amount}
                       onChange={(e) => setAmount(e.target.value)}
-                      className="w-full max-w-[300px] text-center text-7xl font-bold text-primary placeholder-zinc-200 bg-transparent border-none focus:ring-0 p-0"
+                      className="w-full max-w-[300px] text-center text-7xl font-bold text-primary placeholder-zinc-200 bg-transparent border-none focus:ring-0 p-0 [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                       placeholder="0"
                   />
                </div>
@@ -300,14 +309,27 @@ const AddTransaction: React.FC<AddTransactionProps> = ({
                    </div>
                )}
             </div>
-            
-            <button
-                type="submit"
-                className="w-full bg-primary text-white py-5 rounded-2xl font-bold text-xl hover:bg-zinc-800 active:scale-95 transition-all flex items-center justify-center gap-3"
-            >
-                <Check className="w-6 h-6" />
-                <span>{editData ? '更新' : '保存'}</span>
-            </button>
+
+            <div className="space-y-3">
+              <button
+                  type="submit"
+                  className="w-full bg-primary text-white py-5 rounded-2xl font-bold text-xl hover:bg-zinc-800 active:scale-95 transition-all flex items-center justify-center gap-3"
+              >
+                  <Check className="w-6 h-6" />
+                  <span>{editData ? '更新' : '保存'}</span>
+              </button>
+
+              {editData && onDelete && (
+                <button
+                    type="button"
+                    onClick={handleDelete}
+                    className="w-full bg-danger text-white py-5 rounded-2xl font-bold text-xl hover:bg-red-600 active:scale-95 transition-all flex items-center justify-center gap-3"
+                >
+                    <Trash2 className="w-6 h-6" />
+                    <span>删除</span>
+                </button>
+              )}
+            </div>
           </form>
         )}
       </div>

@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { Download, Upload, AlertCircle, Repeat, Trash2, Globe, Key, Cpu, CheckCircle2, ChevronRight } from 'lucide-react';
+import { Download, Upload, AlertCircle, Repeat, Trash2, ChevronRight } from 'lucide-react';
 import { Transaction, Category, RecurringProfile, RecurringFrequency } from '../types';
 import { getIconComponent } from '../constants';
 import { v4 as uuidv4 } from 'uuid';
@@ -20,27 +20,13 @@ const Settings: React.FC<SettingsProps> = ({
     onDeleteRecurring
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
-  
-  // AI Config
-  const [aiConfig, setAiConfig] = useState({ apiKey: '', baseUrl: '', model: '' });
-  const [aiSaved, setAiSaved] = useState(false);
 
   // Export/Import
   const [exportStart, setExportStart] = useState('');
   const [exportEnd, setExportEnd] = useState('');
   const [importMode, setImportMode] = useState<'append' | 'overwrite'>('append');
 
-  useEffect(() => {
-    const saved = localStorage.getItem('smartwallet_ai_config');
-    if (saved) try { setAiConfig(JSON.parse(saved)); } catch (e) {}
-  }, []);
-
-  const handleSaveAiConfig = () => {
-    localStorage.setItem('smartwallet_ai_config', JSON.stringify(aiConfig));
-    setAiSaved(true);
-    setTimeout(() => setAiSaved(false), 2000);
-  };
-
+  
   const handleExport = () => {
     let dataToExport = transactions;
     if (exportStart) dataToExport = dataToExport.filter(t => t.date >= exportStart);
@@ -121,49 +107,6 @@ const Settings: React.FC<SettingsProps> = ({
 
   return (
     <div className="flex flex-col h-full space-y-10 animate-slide-up pb-32">
-      
-      {/* Section: AI */}
-      <section>
-          <h3 className="text-sm font-bold text-secondary uppercase tracking-wider mb-4 px-1">AI 配置</h3>
-          <div className="bg-white border border-border rounded-xl overflow-hidden">
-              <div className="p-5 border-b border-border space-y-5">
-                  <div className="flex items-center gap-4">
-                      <Globe className="w-5 h-5 text-secondary" />
-                      <input 
-                        className="flex-1 text-base bg-transparent placeholder-zinc-300 py-1"
-                        placeholder="接口地址"
-                        value={aiConfig.baseUrl}
-                        onChange={e => setAiConfig({...aiConfig, baseUrl: e.target.value})}
-                      />
-                  </div>
-                  <div className="flex items-center gap-4">
-                      <Key className="w-5 h-5 text-secondary" />
-                      <input 
-                        className="flex-1 text-base bg-transparent placeholder-zinc-300 py-1"
-                        type="password"
-                        placeholder="API 密钥"
-                        value={aiConfig.apiKey}
-                        onChange={e => setAiConfig({...aiConfig, apiKey: e.target.value})}
-                      />
-                  </div>
-                  <div className="flex items-center gap-4">
-                      <Cpu className="w-5 h-5 text-secondary" />
-                      <input 
-                        className="flex-1 text-base bg-transparent placeholder-zinc-300 py-1"
-                        placeholder="模型名称"
-                        value={aiConfig.model}
-                        onChange={e => setAiConfig({...aiConfig, model: e.target.value})}
-                      />
-                  </div>
-              </div>
-              <button 
-                onClick={handleSaveAiConfig}
-                className="w-full py-4 text-base font-medium hover:bg-surface transition-colors flex items-center justify-center gap-2 text-primary"
-              >
-                  {aiSaved ? <CheckCircle2 className="w-5 h-5 text-success" /> : '保存配置'}
-              </button>
-          </div>
-      </section>
 
       {/* Section: Recurring */}
       <section>

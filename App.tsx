@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { LayoutDashboard, PieChart, Sparkles, Plus, Settings as SettingsIcon } from 'lucide-react';
+import { LayoutDashboard, PieChart, Plus, BarChart3, Settings as SettingsIcon } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 
 import { Transaction, AppTab, Category, RecurringProfile, RecurringFrequency } from './types';
 import { DEFAULT_CATEGORIES } from './constants';
 import Dashboard from './components/Dashboard';
 import Stats from './components/Stats';
-import Advisor from './components/Advisor';
+import Analysis from './components/Analysis';
 import AddTransaction from './components/AddTransaction';
 import Settings from './components/Settings';
 
@@ -185,22 +185,21 @@ const App: React.FC = () => {
     switch (activeTab) {
       case AppTab.DASHBOARD:
         return (
-          <Dashboard 
-            transactions={transactions} 
-            categories={categories} 
-            onDelete={handleDeleteTransaction}
-            onEdit={handleEditRequest} 
+          <Dashboard
+            transactions={transactions}
+            categories={categories}
+            onEdit={handleEditRequest}
           />
         );
       case AppTab.STATS:
         return <Stats transactions={transactions} categories={categories} />;
-      case AppTab.ADVISOR:
-        return <Advisor transactions={transactions} categories={categories} />;
+      case AppTab.ANALYSIS:
+        return <Analysis transactions={transactions} categories={categories} />;
       case AppTab.SETTINGS:
         return (
-            <Settings 
-                transactions={transactions} 
-                categories={categories} 
+            <Settings
+                transactions={transactions}
+                categories={categories}
                 recurringProfiles={recurringProfiles}
                 onImport={handleImportTransactions}
                 onDeleteRecurring={handleDeleteRecurring}
@@ -208,10 +207,9 @@ const App: React.FC = () => {
         );
       default:
         return (
-          <Dashboard 
-            transactions={transactions} 
-            categories={categories} 
-            onDelete={handleDeleteTransaction}
+          <Dashboard
+            transactions={transactions}
+            categories={categories}
             onEdit={handleEditRequest}
           />
         );
@@ -221,8 +219,8 @@ const App: React.FC = () => {
   const getHeaderTitle = () => {
     switch (activeTab) {
       case AppTab.DASHBOARD: return '我的账本';
-      case AppTab.STATS: return '统计分析';
-      case AppTab.ADVISOR: return '智能顾问';
+      case AppTab.STATS: return '数据统计';
+      case AppTab.ANALYSIS: return '财务分析';
       case AppTab.SETTINGS: return '设置';
       default: return 'SmartWallet';
     }
@@ -246,17 +244,17 @@ const App: React.FC = () => {
       {/* Minimalist Tab Bar */}
       <nav className="fixed bottom-0 left-0 right-0 z-40 bg-background/90 backdrop-blur-lg border-t border-border" style={{paddingBottom: 'env(safe-area-inset-bottom)'}}>
         <div className="max-w-2xl mx-auto grid grid-cols-5 h-16 items-center">
-          
-          <NavButton 
-            active={activeTab === AppTab.DASHBOARD} 
-            onClick={() => setActiveTab(AppTab.DASHBOARD)} 
-            icon={LayoutDashboard} 
+
+          <NavButton
+            active={activeTab === AppTab.DASHBOARD}
+            onClick={() => setActiveTab(AppTab.DASHBOARD)}
+            icon={LayoutDashboard}
           />
-          
-          <NavButton 
-            active={activeTab === AppTab.STATS} 
-            onClick={() => setActiveTab(AppTab.STATS)} 
-            icon={PieChart} 
+
+          <NavButton
+            active={activeTab === AppTab.STATS}
+            onClick={() => setActiveTab(AppTab.STATS)}
+            icon={PieChart}
           />
 
           {/* Center Add Button */}
@@ -272,16 +270,16 @@ const App: React.FC = () => {
              </button>
           </div>
 
-          <NavButton 
-            active={activeTab === AppTab.ADVISOR} 
-            onClick={() => setActiveTab(AppTab.ADVISOR)} 
-            icon={Sparkles} 
+          <NavButton
+            active={activeTab === AppTab.ANALYSIS}
+            onClick={() => setActiveTab(AppTab.ANALYSIS)}
+            icon={BarChart3}
           />
 
-          <NavButton 
-            active={activeTab === AppTab.SETTINGS} 
-            onClick={() => setActiveTab(AppTab.SETTINGS)} 
-            icon={SettingsIcon} 
+          <NavButton
+            active={activeTab === AppTab.SETTINGS}
+            onClick={() => setActiveTab(AppTab.SETTINGS)}
+            icon={SettingsIcon}
           />
         </div>
       </nav>
@@ -291,6 +289,7 @@ const App: React.FC = () => {
         onClose={handleCloseAddModal}
         onAdd={handleAddTransaction}
         onUpdate={handleUpdateTransaction}
+        onDelete={handleDeleteTransaction}
         onAddRecurring={handleAddRecurring}
         categories={categories}
         onAddCategory={handleAddCategory}

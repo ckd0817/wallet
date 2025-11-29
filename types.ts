@@ -45,6 +45,6 @@ export interface CategoryStats {
 export enum AppTab {
   DASHBOARD = 'DASHBOARD',
   STATS = 'STATS',
-  ADVISOR = 'ADVISOR',
+  ANALYSIS = 'ANALYSIS',
   SETTINGS = 'SETTINGS',
 }
