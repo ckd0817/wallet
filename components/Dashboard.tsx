@@ -138,10 +138,10 @@ const Dashboard: React.FC<DashboardProps> = ({ transactions, categories, onDelet
                                 const category = getCategory(t.categoryId);
                                 const Icon = getIconComponent(category?.icon || 'MoreHorizontal');
                                 return (
-                                    <div 
-                                      key={t.id} 
+                                    <div
+                                      key={t.id}
                                       onClick={() => onEdit(t)}
-                                      className="px-3 py-3 flex items-center justify-between group/item cursor-pointer hover:bg-surface rounded-xl transition-colors -mx-2 relative"
+                                      className="px-3 py-3 flex items-center justify-between cursor-pointer hover:bg-surface rounded-xl transition-colors -mx-2"
                                     >
                                         <div className="flex items-center gap-5 overflow-hidden">
                                             <div className="text-primary opacity-80">
@@ -152,25 +152,11 @@ const Dashboard: React.FC<DashboardProps> = ({ transactions, categories, onDelet
                                                 {t.note && <p className="text-xs text-zinc-400 truncate max-w-[150px]">{t.note}</p>}
                                             </div>
                                         </div>
-                                        <div className="flex items-center gap-4">
-                                            <span className={`font-medium text-base tabular-nums tracking-tight ${
-                                                t.type === 'income' ? 'text-success' : 'text-primary'
-                                            }`}>
-                                                {t.type === 'income' ? '+' : '-'} {t.amount.toFixed(2)}
-                                            </span>
-                                            
-                                            {/* Delete Button: Hidden by default (opacity-0), shown on hover/group-hover */}
-                                            <button 
-                                                onClick={(e) => {
-                                                  // Critical: Stop propagation to prevent editing modal from opening
-                                                  e.stopPropagation();
-                                                  onDelete(t.id);
-                                                }}
-                                                className="w-9 h-9 flex items-center justify-center bg-danger text-white rounded-lg shadow-sm hover:scale-105 active:scale-95 transition-all ml-1 shrink-0 opacity-0 group-hover/item:opacity-100 z-10"
-                                            >
-                                                <Trash2 className="w-5 h-5" />
-                                            </button>
-                                        </div>
+                                        <span className={`font-medium text-base tabular-nums tracking-tight ${
+                                            t.type === 'income' ? 'text-success' : 'text-primary'
+                                        }`}>
+                                            {t.type === 'income' ? '+' : '-'} {t.amount.toFixed(2)}
+                                        </span>
                                     </div>
                                 );
                             })}
