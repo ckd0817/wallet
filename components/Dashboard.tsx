@@ -1,15 +1,16 @@
 import React, { useMemo, useState } from 'react';
 import { Transaction, Category } from '../types';
 import { getIconComponent } from '../constants';
-import { ChevronLeft, ChevronRight, Ban } from 'lucide-react';
+import { Trash2, ChevronLeft, ChevronRight, Ban } from 'lucide-react';
 
 interface DashboardProps {
   transactions: Transaction[];
   categories: Category[];
+  onDelete: (id: string) => void;
   onEdit: (transaction: Transaction) => void;
 }
 
-const Dashboard: React.FC<DashboardProps> = ({ transactions, categories, onEdit }) => {
+const Dashboard: React.FC<DashboardProps> = ({ transactions, categories, onDelete, onEdit }) => {
   const [currentDate, setCurrentDate] = useState(new Date());
 
   const changeMonth = (increment: number) => {
@@ -54,55 +55,55 @@ const Dashboard: React.FC<DashboardProps> = ({ transactions, categories, onEdit 
 
   return (
     <div className="flex flex-col h-full animate-slide-up">
-
-      {/* Month Header - Minimalist */}
-      <div className="flex items-center justify-between mb-8 px-2">
-         {/* Left: Date (Interactive) */}
-         <div className="relative group cursor-pointer">
-            <div className="text-4xl font-light tracking-tight text-primary whitespace-nowrap flex items-baseline gap-2 pointer-events-none">
-               {month}月 <span className="text-xl text-secondary font-normal">{year}</span>
-            </div>
-            {/* Invisible Date Picker Overlay */}
-            <input 
-               type="month"
-               value={monthStr}
-               onChange={(e) => {
-                   if (e.target.value) {
-                       const [y, m] = e.target.value.split('-').map(Number);
-                       setCurrentDate(new Date(y, m - 1, 1));
-                   }
-               }}
-               className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-               title="选择日期"
-            />
-         </div>
+      
+      {/* Header Section */}
+      <div className="flex flex-col gap-6 mb-8 px-2">
          
-         {/* Right: Stats & Nav */}
-         <div className="flex items-center gap-4">
-             {/* Stats */}
-             <div className="flex gap-4 text-right">
-                <div className="flex flex-col items-end">
-                    <span className="text-xs text-secondary uppercase tracking-wider">支出</span>
-                    <span className="font-semibold text-primary text-base">¥{monthlyData.stats.expense.toFixed(2)}</span>
+         {/* Row 1: Date & Navigation */}
+         <div className="flex items-center justify-between">
+             {/* Left: Date (Interactive) */}
+             <div className="relative group cursor-pointer">
+                <div className="text-4xl font-light tracking-tight text-primary whitespace-nowrap flex items-baseline gap-2 pointer-events-none">
+                   {month}月 <span className="text-xl text-secondary font-normal">{year}</span>
                 </div>
-                <div className="flex flex-col items-end">
-                    <span className="text-xs text-secondary uppercase tracking-wider">收入</span>
-                    <span className="font-semibold text-primary text-base">¥{monthlyData.stats.income.toFixed(2)}</span>
-                </div>
+                {/* Invisible Date Picker Overlay */}
+                <input 
+                   type="month"
+                   value={monthStr}
+                   onChange={(e) => {
+                       if (e.target.value) {
+                           const [y, m] = e.target.value.split('-').map(Number);
+                           setCurrentDate(new Date(y, m - 1, 1));
+                       }
+                   }}
+                   className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                   title="选择日期"
+                />
              </div>
 
-             <div className="w-[1px] h-8 bg-border hidden sm:block"></div>
-
-             {/* Nav */}
-             <div className="flex gap-2 pl-2 border-l border-border sm:border-0 sm:pl-0">
-                 <button onClick={() => changeMonth(-1)} className="p-2 text-zinc-400 hover:text-primary transition-colors hover:bg-surface rounded-full">
+             {/* Right: Navigation Arrows */}
+             <div className="flex gap-2">
+                 <button onClick={() => changeMonth(-1)} className="p-2 text-zinc-400 hover:text-primary transition-colors hover:bg-surface rounded-full border border-transparent hover:border-border">
                      <ChevronLeft className="w-6 h-6" />
                  </button>
-                 <button onClick={() => changeMonth(1)} className="p-2 text-zinc-400 hover:text-primary transition-colors hover:bg-surface rounded-full">
+                 <button onClick={() => changeMonth(1)} className="p-2 text-zinc-400 hover:text-primary transition-colors hover:bg-surface rounded-full border border-transparent hover:border-border">
                      <ChevronRight className="w-6 h-6" />
                  </button>
              </div>
          </div>
+
+         {/* Row 2: Stats (Moved below for better mobile layout) */}
+         <div className="flex items-center gap-12">
+            <div className="flex flex-col">
+                <span className="text-xs text-secondary uppercase tracking-wider mb-1">支出</span>
+                <span className="font-semibold text-primary text-2xl">¥{monthlyData.stats.expense.toFixed(2)}</span>
+            </div>
+            <div className="flex flex-col">
+                <span className="text-xs text-secondary uppercase tracking-wider mb-1">收入</span>
+                <span className="font-semibold text-primary text-2xl">¥{monthlyData.stats.income.toFixed(2)}</span>
+            </div>
+         </div>
+         
       </div>
 
       {/* Transaction List */}
@@ -137,10 +138,10 @@ const Dashboard: React.FC<DashboardProps> = ({ transactions, categories, onEdit 
                                 const category = getCategory(t.categoryId);
                                 const Icon = getIconComponent(category?.icon || 'MoreHorizontal');
                                 return (
-                                    <div
-                                      key={t.id}
+                                    <div 
+                                      key={t.id} 
                                       onClick={() => onEdit(t)}
-                                      className="px-3 py-3 flex items-center justify-between cursor-pointer hover:bg-surface rounded-xl transition-colors -mx-2"
+                                      className="px-3 py-3 flex items-center justify-between group/item cursor-pointer hover:bg-surface rounded-xl transition-colors -mx-2 relative"
                                     >
                                         <div className="flex items-center gap-5 overflow-hidden">
                                             <div className="text-primary opacity-80">
@@ -151,11 +152,25 @@ const Dashboard: React.FC<DashboardProps> = ({ transactions, categories, onEdit 
                                                 {t.note && <p className="text-xs text-zinc-400 truncate max-w-[150px]">{t.note}</p>}
                                             </div>
                                         </div>
-                                        <span className={`font-medium text-base tabular-nums tracking-tight ${
-                                            t.type === 'income' ? 'text-success' : 'text-primary'
-                                        }`}>
-                                            {t.type === 'income' ? '+' : '-'} {t.amount.toFixed(2)}
-                                        </span>
+                                        <div className="flex items-center gap-4">
+                                            <span className={`font-medium text-base tabular-nums tracking-tight ${
+                                                t.type === 'income' ? 'text-success' : 'text-primary'
+                                            }`}>
+                                                {t.type === 'income' ? '+' : '-'} {t.amount.toFixed(2)}
+                                            </span>
+                                            
+                                            {/* Delete Button: Hidden by default (opacity-0), shown on hover/group-hover */}
+                                            <button 
+                                                onClick={(e) => {
+                                                  // Critical: Stop propagation to prevent editing modal from opening
+                                                  e.stopPropagation();
+                                                  onDelete(t.id);
+                                                }}
+                                                className="w-9 h-9 flex items-center justify-center bg-danger text-white rounded-lg shadow-sm hover:scale-105 active:scale-95 transition-all ml-1 shrink-0 opacity-0 group-hover/item:opacity-100 z-10"
+                                            >
+                                                <Trash2 className="w-5 h-5" />
+                                            </button>
+                                        </div>
                                     </div>
                                 );
                             })}
