@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { X, Check, Calendar, Plus, ChevronLeft, Repeat, Pencil, Trash2 } from 'lucide-react';
+import { X, Check, Calendar, Plus, ChevronLeft, Repeat, Pencil, Trash2, Calculator } from 'lucide-react';
 import { TransactionType, Category, RecurringFrequency, Transaction } from '../types';
 import { getIconComponent, COLORS } from '../constants';
 import { v4 as uuidv4 } from 'uuid';
+import CalculatorKeyboard from './CalculatorKeyboard';
 
 interface AddTransactionProps {
   isOpen: boolean;
@@ -39,6 +40,7 @@ const AddTransaction: React.FC<AddTransactionProps> = ({
   const [isCreatingCategory, setIsCreatingCategory] = useState(false);
   const [newCatName, setNewCatName] = useState('');
   const [newCatColor, setNewCatColor] = useState(COLORS[0]);
+  const [showCalculator, setShowCalculator] = useState(false);
 
   useEffect(() => {
     if (editData && isOpen) {
@@ -47,7 +49,7 @@ const AddTransaction: React.FC<AddTransactionProps> = ({
       setCategoryId(editData.categoryId);
       setDate(editData.date);
       setNote(editData.note || '');
-      setIsRecurring(false); 
+      setIsRecurring(false);
     } else if (isOpen) {
       setAmount('');
       setNote('');
@@ -62,9 +64,9 @@ const AddTransaction: React.FC<AddTransactionProps> = ({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!amount || !categoryId) return;
-    
+
     const numAmount = parseFloat(amount);
-    
+
     if (editData && onUpdate) {
       onUpdate(editData.id, {
         amount: numAmount,
@@ -81,7 +83,7 @@ const AddTransaction: React.FC<AddTransactionProps> = ({
               categoryId,
               note,
               frequency,
-              startDate: date 
+              startDate: date
           });
       } else {
           onAdd({
@@ -199,16 +201,13 @@ const AddTransaction: React.FC<AddTransactionProps> = ({
             <div className="flex flex-col items-center justify-center py-6">
                <div className="flex items-baseline gap-2 text-primary">
                   <span className="text-5xl font-light">¥</span>
-                  <input
-                      type="number"
-                      step="0.01"
-                      autoFocus
-                      required
-                      value={amount}
-                      onChange={(e) => setAmount(e.target.value)}
-                      className="w-full max-w-[300px] text-center text-7xl font-bold text-primary placeholder-zinc-200 bg-transparent border-none focus:ring-0 p-0 [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                      placeholder="0"
-                  />
+                  <button
+                      type="button"
+                      onClick={() => setShowCalculator(true)}
+                      className="w-full max-w-[300px] text-center text-7xl font-bold text-primary placeholder-zinc-200 bg-transparent border-none focus:ring-0 p-0 hover:bg-surface rounded-xl transition-colors"
+                  >
+                      {amount || '0'}
+                  </button>
                </div>
             </div>
 
@@ -331,6 +330,17 @@ const AddTransaction: React.FC<AddTransactionProps> = ({
               )}
             </div>
           </form>
+        )}
+
+        {/* Calculator Keyboard Modal */}
+        {showCalculator && (
+          <CalculatorKeyboard
+            onResult={(value) => {
+              setAmount(value);
+              setShowCalculator(false);
+            }}
+            onClose={() => setShowCalculator(false)}
+          />
         )}
       </div>
     </div>
