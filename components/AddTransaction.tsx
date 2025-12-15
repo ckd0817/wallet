@@ -41,6 +41,7 @@ const AddTransaction: React.FC<AddTransactionProps> = ({
   const [newCatName, setNewCatName] = useState('');
   const [newCatColor, setNewCatColor] = useState(COLORS[0]);
   const [showCalculator, setShowCalculator] = useState(false);
+  const [showCategoryError, setShowCategoryError] = useState(false);
 
   useEffect(() => {
     if (editData && isOpen) {
@@ -50,12 +51,14 @@ const AddTransaction: React.FC<AddTransactionProps> = ({
       setDate(editData.date);
       setNote(editData.note || '');
       setIsRecurring(false);
+      setShowCategoryError(false);
     } else if (isOpen) {
       setAmount('');
       setNote('');
       setDate(new Date().toISOString().split('T')[0]);
       setCategoryId('');
       setIsRecurring(false);
+      setShowCategoryError(false);
     }
   }, [editData, isOpen]);
 
@@ -63,7 +66,16 @@ const AddTransaction: React.FC<AddTransactionProps> = ({
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!amount || !categoryId) return;
+    if (!amount) return;
+
+    if (!categoryId) {
+      setShowCategoryError(true);
+      const categoryGrid = document.querySelector('[data-category-grid]') as HTMLDivElement;
+      if (categoryGrid) {
+        categoryGrid.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+      return;
+    }
 
     const numAmount = parseFloat(amount);
 
@@ -212,8 +224,13 @@ const AddTransaction: React.FC<AddTransactionProps> = ({
             </div>
 
             {/* Category Grid */}
-            <div>
-               <label className="text-sm font-bold text-zinc-400 uppercase tracking-wider mb-4 block">分类</label>
+            <div data-category-grid>
+               <div className="flex items-center gap-2 mb-4">
+                  <label className="text-sm font-bold text-zinc-400 uppercase tracking-wider">分类</label>
+                  {showCategoryError && (
+                    <span className="text-xs text-danger">请选择分类</span>
+                  )}
+               </div>
                <div className="grid grid-cols-4 gap-4">
                   {filteredCategories.map(cat => {
                       const Icon = getIconComponent(cat.icon);
@@ -222,7 +239,10 @@ const AddTransaction: React.FC<AddTransactionProps> = ({
                           <button
                               key={cat.id}
                               type="button"
-                              onClick={() => setCategoryId(cat.id)}
+                              onClick={() => {
+                                setCategoryId(cat.id);
+                                setShowCategoryError(false);
+                              }}
                               className={`flex flex-col items-center gap-2 transition-all ${
                                   isSelected ? 'opacity-100 scale-105' : 'opacity-50 hover:opacity-80'
                               }`}
