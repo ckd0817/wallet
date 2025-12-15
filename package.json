@@ -1,5 +1,5 @@
 {
-  "name": "smartwallet---智能记账",
+  "name": "smartwallet---记账",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -15,6 +15,7 @@
     "@capacitor/android": "^7.4.4",
     "@capacitor/cli": "^7.4.4",
     "@capacitor/core": "^7.4.4",
+    "@capacitor/filesystem": "^7.1.5",
     "@google/genai": "^1.30.0",
     "lucide-react": "^0.555.0",
     "react": "^19.2.0",
