@@ -1,10 +1,11 @@
-import React, { useMemo, useState, useEffect } from 'react';
-import { Transaction, Category, TransactionType } from '../types';
-import { TrendingUp, TrendingDown, DollarSign, Target, AlertCircle, Award } from 'lucide-react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Transaction, Category, TransactionType, LLMConfig } from '../types';
+import { TrendingUp, TrendingDown, DollarSign, Target, AlertCircle, Award, Sparkles, Loader2 } from 'lucide-react';
 
 interface AnalysisProps {
   transactions: Transaction[];
   categories: Category[];
+  llmConfig: LLMConfig;
 }
 
 interface FinancialHealth {
@@ -20,8 +21,10 @@ interface SpendingInsight {
   recommendations: Array<{ message: string; priority: 'high' | 'medium' | 'low' }>;
 }
 
-const Analysis: React.FC<AnalysisProps> = ({ transactions, categories }) => {
+const Analysis: React.FC<AnalysisProps> = ({ transactions, categories, llmConfig }) => {
   const [selectedPeriod, setSelectedPeriod] = useState<'month' | 'quarter' | 'year'>('month');
+  const [llmInsights, setLlmInsights] = useState<{ habits: any[], recommendations: any[] } | null>(null);
+  const [isLoadingLLM, setIsLoadingLLM] = useState(false);
 
   // Calculate financial health metrics
   const financialHealth = useMemo((): FinancialHealth => {
@@ -105,36 +108,36 @@ const Analysis: React.FC<AnalysisProps> = ({ transactions, categories }) => {
       new Date(t.date) >= periodStart && t.type === 'expense'
     );
 
-    const categoryTotals = periodTransactions.reduce((acc, t) => {
+    const categoryTotals = periodTransactions.reduce((acc: Record<string, number>, t) => {
       const cat = categories.find(c => c.id === t.categoryId);
       const name = cat?.name || '未知';
       acc[name] = (acc[name] || 0) + t.amount;
       return acc;
     }, {} as Record<string, number>);
 
-    const totalExpense = Object.values(categoryTotals).reduce((sum, val) => sum + val, 0);
+    const totalExpense = (Object.values(categoryTotals) as number[]).reduce((sum, val) => sum + val, 0);
 
     // Calculate daily spending for stability analysis
-    const dailyExpenses = periodTransactions.reduce((acc, t) => {
+    const dailyExpenses = periodTransactions.reduce((acc: Record<string, number>, t) => {
       const dateStr = t.date.split('T')[0]; // Extract date part
       acc[dateStr] = (acc[dateStr] || 0) + t.amount;
       return acc;
     }, {} as Record<string, number>);
 
-    const dailyAmounts = Object.values(dailyExpenses);
+    const dailyAmounts = Object.values(dailyExpenses) as number[];
     const avgDailySpend = dailyAmounts.length > 0 ? dailyAmounts.reduce((sum, val) => sum + val, 0) / dailyAmounts.length : 0;
     const spendingVariance = dailyAmounts.length > 1 ?
       dailyAmounts.reduce((sum, val) => sum + Math.pow(val - avgDailySpend, 2), 0) / (dailyAmounts.length - 1) : 0;
     const spendingStdDev = Math.sqrt(spendingVariance);
     const spendingVolatility = avgDailySpend > 0 ? (spendingStdDev / avgDailySpend) * 100 : 0;
 
-    const topCategories = Object.entries(categoryTotals)
-      .sort(([,a], [,b]) => b - a)
+    const topCategories = (Object.entries(categoryTotals) as [string, number][])
+      .sort(([, a], [, b]) => b - a)
       .slice(0, 5)
       .map(([name, amount]) => ({
         name,
-        amount,
-        percentage: totalExpense > 0 ? (amount / totalExpense) * 100 : 0
+        amount: amount as number,
+        percentage: totalExpense > 0 ? ((amount as number) / totalExpense) * 100 : 0
       }));
 
     const habits = [];
@@ -257,15 +260,15 @@ const Analysis: React.FC<AnalysisProps> = ({ transactions, categories }) => {
 
     if (periodTransactions.length > 50) {
       // Frequent spender
-      const highFrequencyCategories = periodTransactions.reduce((acc, t) => {
+      const highFrequencyCategories = periodTransactions.reduce((acc: Record<string, number>, t) => {
         const cat = categories.find(c => c.id === t.categoryId);
         const name = cat?.name || '未知';
         acc[name] = (acc[name] || 0) + 1;
         return acc;
       }, {} as Record<string, number>);
 
-      const mostFrequent = Object.entries(highFrequencyCategories)
-        .sort(([,a], [,b]) => b - a)[0];
+      const mostFrequent = (Object.entries(highFrequencyCategories) as [string, number][])
+        .sort(([, a], [, b]) => b - a)[0];
 
       if (mostFrequent && mostFrequent[1] > 15) {
         recommendations.push({ message: `${mostFrequent[0]}消费频率很高，考虑是否有更经济的选择`, priority: 'medium' as const });
@@ -278,12 +281,139 @@ const Analysis: React.FC<AnalysisProps> = ({ transactions, categories }) => {
       recommendations.push({ message: '考虑设定更高的财务目标，挑战自我', priority: 'low' as const });
     }
 
+    // If LLM results are available, override habits and recommendations
+    if (llmConfig.enabled) {
+      if (llmInsights) {
+        return {
+          topCategories,
+          habits: llmInsights.habits,
+          recommendations: llmInsights.recommendations
+        };
+      }
+      // AI enabled but not loaded yet, return empty to show loading state
+      return {
+        topCategories,
+        habits: [],
+        recommendations: []
+      };
+    }
+
     return {
       topCategories,
       habits,
       recommendations
     };
-  }, [transactions, categories, selectedPeriod, financialHealth]);
+  }, [transactions, categories, selectedPeriod, financialHealth, llmInsights, llmConfig.enabled]);
+
+  // Effect to trigger LLM analysis
+  useEffect(() => {
+    if (!llmConfig.enabled || !llmConfig.apiKey || !llmConfig.baseUrl) {
+      setLlmInsights(null);
+      return;
+    }
+
+    const generateAnalysis = async () => {
+      setIsLoadingLLM(true);
+      try {
+        // Prepare data for LLM
+        const periodName = selectedPeriod === 'month' ? '本月' : selectedPeriod === 'quarter' ? '本季度' : '本年度';
+
+        // Helper to get category name
+        const getCatName = (id: string) => categories.find(c => c.id === id)?.name || '未知';
+
+        // Simplified transactions for context (top 20 largest expenses)
+        // We don't want to send too much data
+        const now = new Date();
+        let periodStart = new Date();
+        if (selectedPeriod === 'month') periodStart.setMonth(now.getMonth(), 1);
+        else if (selectedPeriod === 'quarter') periodStart.setMonth(Math.floor(now.getMonth() / 3) * 3, 1);
+        else periodStart.setMonth(0, 1);
+        periodStart.setHours(0, 0, 0, 0);
+
+        const relevantTrans = transactions.filter(t => new Date(t.date) >= periodStart);
+        const totalIncome = relevantTrans.filter(t => t.type === 'income').reduce((s, t) => s + t.amount, 0);
+        const totalExpense = relevantTrans.filter(t => t.type === 'expense').reduce((s, t) => s + t.amount, 0);
+
+        const topExpenses = relevantTrans
+          .filter(t => t.type === 'expense')
+          .sort((a, b) => b.amount - a.amount)
+          .slice(0, 10)
+          .map(t => `${t.date}: ${getCatName(t.categoryId)} - ${t.amount}元 (${t.note})`)
+          .join('\n');
+
+        const prompt = `
+你是一个专业的财务理财顾问。请根据以下用户的近期财务数据进行分析，生成简短犀利的消费洞察和理财建议。
+时间范围：${periodName}
+总收入：${totalIncome.toFixed(2)}
+总支出：${totalExpense.toFixed(2)}
+净结余：${(totalIncome - totalExpense).toFixed(2)}
+前十大笔支出：
+${topExpenses}
+
+请返回 strictly JSON 格式的数据，不要包含 markdown 代码块标记，结构如下：
+{
+  "habits": [
+    {"type": "warning", "message": "简短的警示性洞察"},
+    {"type": "success", "message": "简短的鼓励性洞察"},
+    {"type": "info", "message": "客观的消费事实"}
+  ],
+  "recommendations": [
+    {"message": "具体的理财建议", "priority": "high|medium|low"}
+  ]
+}
+注意：
+1. habits 至少3条，recommendations 至少3条。
+2. type 只能是 warning, success, info 之一。
+3. priority 只能是 high, medium, low 之一。
+4. 语言风格要专业、客观但易懂。
+`;
+
+        const response = await fetch(`${llmConfig.baseUrl}/chat/completions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${llmConfig.apiKey}`
+          },
+          body: JSON.stringify({
+            model: llmConfig.modelName || 'gpt-3.5-turbo',
+            messages: [
+              { role: 'system', content: 'You are a helpful financial assistant that outputs raw JSON.' },
+              { role: 'user', content: prompt }
+            ],
+            temperature: 0.7
+          })
+        });
+
+        if (!response.ok) throw new Error('API request failed');
+
+        const data = await response.json();
+        const content = data.choices[0]?.message?.content;
+
+        if (content) {
+          // Try to parse JSON from potential markdown code blocks
+          const jsonStr = content.replace(/```json\n?|\n?```/g, '').trim();
+          const parsed = JSON.parse(jsonStr);
+          if (parsed.habits && parsed.recommendations) {
+            setLlmInsights(parsed);
+          }
+        }
+      } catch (error) {
+        console.error('LLM Analysis failed:', error);
+        // Fallback to local analysis silently
+      } finally {
+        setIsLoadingLLM(false);
+      }
+    };
+
+    // Debounce or just run? Let's run when dependencies change. 
+    // To avoid too many calls, maybe we can add a manual trigger or just rely on useEffect
+    // Given it's a "Wallet" app, data changes when user adds transaction.
+    // We can use a timeout to debounce.
+    const timer = setTimeout(generateAnalysis, 1000);
+    return () => clearTimeout(timer);
+
+  }, [transactions, selectedPeriod, llmConfig]);
+
 
   return (
     <div className="flex flex-col h-full animate-slide-up pb-24 space-y-8">
@@ -298,11 +428,10 @@ const Analysis: React.FC<AnalysisProps> = ({ transactions, categories }) => {
           <button
             key={period.value}
             onClick={() => setSelectedPeriod(period.value as any)}
-            className={`flex-1 py-2 text-sm font-semibold rounded-xl transition-all ${
-              selectedPeriod === period.value
+            className={`flex-1 py-2 text-sm font-semibold rounded-xl transition-all ${selectedPeriod === period.value
               ? 'bg-primary text-white shadow-sm'
               : 'text-secondary hover:text-primary'
-            }`}
+              }`}
           >
             {period.label}
           </button>
@@ -356,14 +485,27 @@ const Analysis: React.FC<AnalysisProps> = ({ transactions, categories }) => {
       </div>
 
       {/* Spending Insights */}
-      <div className="bg-white border border-border p-6 rounded-2xl">
-        <h3 className="text-base font-semibold text-primary mb-4">消费洞察</h3>
+      <div className="bg-white border border-border p-6 rounded-2xl relative">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-base font-semibold text-primary">消费洞察</h3>
+          {(isLoadingLLM || (llmConfig.enabled && !llmInsights)) && (
+            <div className="flex items-center gap-2 text-xs text-secondary animate-pulse">
+              <Loader2 className="w-3 h-3 animate-spin" />
+              <span>AI 思考中...</span>
+            </div>
+          )}
+          {!isLoadingLLM && llmConfig.enabled && llmInsights && (
+            <div className="flex items-center gap-1 text-xs text-purple-500">
+              <Sparkles className="w-3 h-3" />
+              <span>AI 生成</span>
+            </div>
+          )}
+        </div>
         <div className="space-y-3">
           {spendingInsights.habits.map((habit, index) => (
-            <div key={index} className={`flex items-start gap-3 p-3 rounded-lg ${
-              habit.type === 'success' ? 'bg-green-50' :
+            <div key={index} className={`flex items-start gap-3 p-3 rounded-lg ${habit.type === 'success' ? 'bg-green-50' :
               habit.type === 'warning' ? 'bg-red-50' : 'bg-blue-50'
-            }`}>
+              }`}>
               {habit.type === 'success' ? (
                 <Award className="w-4 h-4 text-success mt-0.5" />
               ) : habit.type === 'warning' ? (
@@ -371,10 +513,9 @@ const Analysis: React.FC<AnalysisProps> = ({ transactions, categories }) => {
               ) : (
                 <AlertCircle className="w-4 h-4 text-info mt-0.5" />
               )}
-              <span className={`text-sm ${
-                habit.type === 'success' ? 'text-success' :
+              <span className={`text-sm ${habit.type === 'success' ? 'text-success' :
                 habit.type === 'warning' ? 'text-danger' : 'text-info'
-              }`}>
+                }`}>
                 {habit.message}
               </span>
             </div>
@@ -404,16 +545,29 @@ const Analysis: React.FC<AnalysisProps> = ({ transactions, categories }) => {
       </div>
 
       {/* Recommendations */}
-      {spendingInsights.recommendations.length > 0 && (
-        <div className="bg-white border border-border p-6 rounded-2xl">
-          <h3 className="text-base font-semibold text-primary mb-4">理财建议</h3>
+      {(spendingInsights.recommendations.length > 0 || (llmConfig.enabled && !llmInsights)) && (
+        <div className="bg-white border border-border p-6 rounded-2xl relative">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-base font-semibold text-primary">理财建议</h3>
+            {(isLoadingLLM || (llmConfig.enabled && !llmInsights)) && (
+              <div className="flex items-center gap-2 text-xs text-secondary animate-pulse">
+                <Loader2 className="w-3 h-3 animate-spin" />
+                <span>AI 思考中...</span>
+              </div>
+            )}
+            {!isLoadingLLM && llmConfig.enabled && llmInsights && (
+              <div className="flex items-center gap-1 text-xs text-purple-500">
+                <Sparkles className="w-3 h-3" />
+                <span>AI 生成</span>
+              </div>
+            )}
+          </div>
           <div className="space-y-3">
             {spendingInsights.recommendations.map((rec, index) => (
               <div key={index} className="flex items-start gap-3 p-3 rounded-lg bg-surface">
-                <div className={`w-2 h-2 rounded-full mt-2 ${
-                  rec.priority === 'high' ? 'bg-red-500' :
+                <div className={`w-2 h-2 rounded-full mt-2 ${rec.priority === 'high' ? 'bg-red-500' :
                   rec.priority === 'medium' ? 'bg-yellow-500' : 'bg-green-500'
-                }`} />
+                  }`} />
                 <span className="text-sm text-primary">{rec.message}</span>
               </div>
             ))}

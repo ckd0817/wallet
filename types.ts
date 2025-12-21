@@ -48,3 +48,10 @@ export enum AppTab {
   ANALYSIS = 'ANALYSIS',
   SETTINGS = 'SETTINGS',
 }
+
+export interface LLMConfig {
+  apiKey: string;
+  baseUrl: string;
+  modelName: string;
+  enabled: boolean;
+}

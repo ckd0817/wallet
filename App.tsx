@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { LayoutDashboard, PieChart, Plus, BarChart3, Settings as SettingsIcon } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
 
-import { Transaction, AppTab, Category, RecurringProfile, RecurringFrequency } from './types';
+import { Transaction, AppTab, Category, RecurringProfile, RecurringFrequency, LLMConfig } from './types';
 import { DEFAULT_CATEGORIES } from './constants';
 import Dashboard from './components/Dashboard';
 import Stats from './components/Stats';
@@ -14,10 +14,11 @@ const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<AppTab>(AppTab.DASHBOARD);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
-  
+
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [categories, setCategories] = useState<Category[]>(DEFAULT_CATEGORIES);
   const [recurringProfiles, setRecurringProfiles] = useState<RecurringProfile[]>([]);
+  const [llmConfig, setLlmConfig] = useState<LLMConfig>({ apiKey: '', baseUrl: '', modelName: '', enabled: false });
   const [isInitialized, setIsInitialized] = useState(false);
 
   // Helper to calculate next date
@@ -35,7 +36,7 @@ const App: React.FC = () => {
         date.setMonth(currentMonth + 1);
         // Handle month end overflow
         if (date.getMonth() !== (currentMonth + 1) % 12) {
-          date.setDate(0); 
+          date.setDate(0);
         }
         break;
       case 'yearly':
@@ -75,7 +76,8 @@ const App: React.FC = () => {
     const savedTransactions = localStorage.getItem('smartwallet_transactions');
     const savedCategories = localStorage.getItem('smartwallet_categories');
     const savedRecurring = localStorage.getItem('smartwallet_recurring');
-    
+    const savedLLMConfig = localStorage.getItem('smartwallet_llm_config');
+
     let loadedTransactions: Transaction[] = [];
     let loadedProfiles: RecurringProfile[] = [];
 
@@ -99,6 +101,10 @@ const App: React.FC = () => {
       try { loadedProfiles = JSON.parse(savedRecurring); } catch (e) { console.error(e); }
     }
 
+    if (savedLLMConfig) {
+      try { setLlmConfig(JSON.parse(savedLLMConfig)); } catch (e) { console.error(e); }
+    }
+
     const result = processRecurringTransactions(loadedProfiles, loadedTransactions);
     setTransactions([...result.newTransactions, ...loadedTransactions]);
     setRecurringProfiles(result.updatedProfiles);
@@ -110,8 +116,9 @@ const App: React.FC = () => {
       localStorage.setItem('smartwallet_transactions', JSON.stringify(transactions));
       localStorage.setItem('smartwallet_categories', JSON.stringify(categories));
       localStorage.setItem('smartwallet_recurring', JSON.stringify(recurringProfiles));
+      localStorage.setItem('smartwallet_llm_config', JSON.stringify(llmConfig));
     }
-  }, [transactions, categories, recurringProfiles, isInitialized]);
+  }, [transactions, categories, recurringProfiles, llmConfig, isInitialized]);
 
   // Handlers ...
   const handleAddTransaction = (data: Omit<Transaction, 'id'>) => {
@@ -136,20 +143,20 @@ const App: React.FC = () => {
   const handleAddRecurring = (data: Omit<RecurringProfile, 'id' | 'nextDueDate'>) => {
     const newProfile: RecurringProfile = {
       id: uuidv4(),
-      nextDueDate: data.startDate, 
+      nextDueDate: data.startDate,
       ...data
     };
     const today = new Date().toISOString().split('T')[0];
     if (newProfile.nextDueDate <= today) {
-       const result = processRecurringTransactions([newProfile], transactions);
-       if (result.hasUpdates) {
-          setTransactions(prev => [...result.newTransactions, ...prev]);
-          setRecurringProfiles(prev => [...prev, result.updatedProfiles[0]]);
-       } else {
-          setRecurringProfiles(prev => [...prev, newProfile]);
-       }
+      const result = processRecurringTransactions([newProfile], transactions);
+      if (result.hasUpdates) {
+        setTransactions(prev => [...result.newTransactions, ...prev]);
+        setRecurringProfiles(prev => [...prev, result.updatedProfiles[0]]);
+      } else {
+        setRecurringProfiles(prev => [...prev, newProfile]);
+      }
     } else {
-       setRecurringProfiles(prev => [...prev, newProfile]);
+      setRecurringProfiles(prev => [...prev, newProfile]);
     }
   };
 
@@ -161,7 +168,7 @@ const App: React.FC = () => {
 
   const handleDeleteTransaction = (id: string) => {
     if (window.confirm('确认删除？')) {
-        setTransactions(prev => prev.filter(t => t.id !== id));
+      setTransactions(prev => prev.filter(t => t.id !== id));
     }
   };
 
@@ -171,13 +178,13 @@ const App: React.FC = () => {
 
   const handleImportTransactions = (importedData: Transaction[], mode: 'append' | 'overwrite') => {
     if (mode === 'overwrite') {
-        if (window.confirm('警告：覆盖模式将清空现有数据。继续吗？')) {
-            setTransactions(importedData);
-            alert(`成功导入 ${importedData.length} 条数据。`);
-        }
+      if (window.confirm('警告：覆盖模式将清空现有数据。继续吗？')) {
+        setTransactions(importedData);
+        alert(`成功导入 ${importedData.length} 条数据。`);
+      }
     } else {
-        setTransactions(prev => [...importedData, ...prev]);
-        alert(`成功追加 ${importedData.length} 条数据。`);
+      setTransactions(prev => [...importedData, ...prev]);
+      alert(`成功追加 ${importedData.length} 条数据。`);
     }
   };
 
@@ -194,16 +201,19 @@ const App: React.FC = () => {
       case AppTab.STATS:
         return <Stats transactions={transactions} categories={categories} />;
       case AppTab.ANALYSIS:
-        return <Analysis transactions={transactions} categories={categories} />;
+        return <Analysis transactions={transactions} categories={categories} llmConfig={llmConfig} />;
       case AppTab.SETTINGS:
         return (
-            <Settings
-                transactions={transactions}
-                categories={categories}
-                recurringProfiles={recurringProfiles}
-                onImport={handleImportTransactions}
-                onDeleteRecurring={handleDeleteRecurring}
-            />
+          <Settings
+            transactions={transactions}
+            categories={categories}
+            recurringProfiles={recurringProfiles}
+            importMode='append'
+            llmConfig={llmConfig}
+            onUpdateLLMConfig={setLlmConfig}
+            onImport={handleImportTransactions}
+            onDeleteRecurring={handleDeleteRecurring}
+          />
         );
       default:
         return (
@@ -222,27 +232,27 @@ const App: React.FC = () => {
       case AppTab.STATS: return '数据统计';
       case AppTab.ANALYSIS: return '财务分析';
       case AppTab.SETTINGS: return '设置';
-      default: return 'SmartWallet';
+      default: return '记账';
     }
   };
 
   return (
     <div className="min-h-screen bg-background text-primary font-sans relative">
-      
+
       {/* Minimalist Header */}
       <header className="sticky top-0 z-30 bg-background/80 backdrop-blur-xl border-b border-border px-6 h-16 flex items-center justify-between transition-all">
         <h1 className="text-2xl font-bold tracking-tight text-primary">
-            {getHeaderTitle()}
+          {getHeaderTitle()}
         </h1>
       </header>
 
       {/* Main Content */}
-      <main className="max-w-2xl mx-auto p-4 pb-20 min-h-screen animate-fade-in" style={{paddingBottom: 'calc(5rem + env(safe-area-inset-bottom))'}}>
+      <main className="max-w-2xl mx-auto p-4 pb-20 min-h-screen animate-fade-in" style={{ paddingBottom: 'calc(5rem + env(safe-area-inset-bottom))' }}>
         {renderContent()}
       </main>
 
       {/* Minimalist Tab Bar */}
-      <nav className="fixed bottom-0 left-0 right-0 z-40 bg-background/90 backdrop-blur-lg border-t border-border" style={{paddingBottom: 'env(safe-area-inset-bottom)'}}>
+      <nav className="fixed bottom-0 left-0 right-0 z-40 bg-background/90 backdrop-blur-lg border-t border-border" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
         <div className="max-w-2xl mx-auto grid grid-cols-5 h-16 items-center">
 
           <NavButton
@@ -259,15 +269,15 @@ const App: React.FC = () => {
 
           {/* Center Add Button */}
           <div className="relative flex items-center justify-center">
-             <button
-                onClick={() => {
-                  setEditingTransaction(null);
-                  setIsAddModalOpen(true);
-                }}
-                className="absolute -top-6 w-14 h-14 bg-primary text-white rounded-full shadow-lg shadow-zinc-200 flex items-center justify-center hover:scale-105 active:scale-95 transition-all"
-             >
-                <Plus className="w-7 h-7" />
-             </button>
+            <button
+              onClick={() => {
+                setEditingTransaction(null);
+                setIsAddModalOpen(true);
+              }}
+              className="absolute -top-6 w-14 h-14 bg-primary text-white rounded-full shadow-lg shadow-zinc-200 flex items-center justify-center hover:scale-105 active:scale-95 transition-all"
+            >
+              <Plus className="w-7 h-7" />
+            </button>
           </div>
 
           <NavButton
@@ -302,9 +312,8 @@ const App: React.FC = () => {
 const NavButton = ({ active, onClick, icon: Icon }: any) => (
   <button
     onClick={onClick}
-    className={`flex flex-col items-center justify-center w-full h-full transition-all duration-300 ${
-      active ? 'text-primary' : 'text-zinc-300 hover:text-zinc-500'
-    }`}
+    className={`flex flex-col items-center justify-center w-full h-full transition-all duration-300 ${active ? 'text-primary' : 'text-zinc-300 hover:text-zinc-500'
+      }`}
   >
     <Icon className="w-6 h-6" strokeWidth={active ? 2.5 : 2} />
     {active && <span className="w-1 h-1 bg-primary rounded-full mt-1"></span>}
