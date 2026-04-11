@@ -76,7 +76,6 @@ export const defaultLlmConfig = (): LLMConfig => ({
   apiKey: '',
   baseUrl: '',
   modelName: '',
-  enabled: false,
   timeoutMs: 20000,
   capturePrompt: DEFAULT_CAPTURE_PROMPT,
 });
@@ -101,26 +100,19 @@ export const buildDefaultSnapshot = (): WalletSnapshot => ({
 
 const normalizeLlmConfig = (llmConfig?: Partial<LLMConfig> | null): LLMConfig => {
   const defaults = defaultLlmConfig();
-  const merged = {
-    ...defaults,
-    ...(llmConfig ?? {}),
+  const merged = llmConfig ?? {};
+  const capturePrompt =
+    typeof merged.capturePrompt === 'string' && merged.capturePrompt.trim().length > 0
+      ? merged.capturePrompt
+      : DEFAULT_CAPTURE_PROMPT;
+
+  return {
+    apiKey: typeof merged.apiKey === 'string' ? merged.apiKey : defaults.apiKey,
+    baseUrl: typeof merged.baseUrl === 'string' ? merged.baseUrl : defaults.baseUrl,
+    modelName: typeof merged.modelName === 'string' ? merged.modelName : defaults.modelName,
+    timeoutMs: typeof merged.timeoutMs === 'number' ? merged.timeoutMs : defaults.timeoutMs,
+    capturePrompt: capturePrompt === LEGACY_CAPTURE_PROMPT ? DEFAULT_CAPTURE_PROMPT : capturePrompt,
   };
-
-  if (!merged.capturePrompt || merged.capturePrompt.trim().length === 0) {
-    return {
-      ...merged,
-      capturePrompt: DEFAULT_CAPTURE_PROMPT,
-    };
-  }
-
-  if (merged.capturePrompt === LEGACY_CAPTURE_PROMPT) {
-    return {
-      ...merged,
-      capturePrompt: DEFAULT_CAPTURE_PROMPT,
-    };
-  }
-
-  return merged;
 };
 
 const normalizeCaptureLogs = (captureLogs?: CaptureAttemptLog[] | null) =>

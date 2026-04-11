@@ -37,7 +37,6 @@ public class CaptureAnalysisClient {
     public CaptureAnalysisOutcome analyze(byte[] pngBytes, JSONObject llmConfig, JSONArray categories) {
         if (
             llmConfig == null ||
-            !llmConfig.optBoolean("enabled", false) ||
             llmConfig.optString("apiKey", "").trim().isEmpty() ||
             llmConfig.optString("baseUrl", "").trim().isEmpty() ||
             llmConfig.optString("modelName", "").trim().isEmpty()

@@ -43,7 +43,6 @@ public final class WalletDefaults {
         safePut(object, "apiKey", "");
         safePut(object, "baseUrl", "");
         safePut(object, "modelName", "");
-        safePut(object, "enabled", false);
         safePut(object, "timeoutMs", 20000);
         safePut(object, "capturePrompt", DEFAULT_CAPTURE_PROMPT);
         return object;
@@ -75,6 +74,7 @@ public final class WalletDefaults {
 
         JSONObject llmConfig = cloneObject(defaultLlmConfig());
         mergeInto(llmConfig, candidate.optJSONObject("llmConfig"));
+        llmConfig.remove("enabled");
         safePut(llmConfig, "capturePrompt", normalizeCapturePrompt(llmConfig.optString("capturePrompt", "")));
         safePut(merged, "llmConfig", llmConfig);
 

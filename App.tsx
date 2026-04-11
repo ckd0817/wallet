@@ -25,7 +25,6 @@ import {
   addNativeDeepLinkListener,
   addNativeStatusListener,
   buildDefaultSnapshot,
-  captureNativeNow,
   consumePendingNativeDeepLink,
   defaultAutoBookkeepingSettings,
   deleteNativeRecurringProfile,
@@ -520,18 +519,6 @@ const App: React.FC = () => {
     }));
   };
 
-  const handleCaptureNow = async () => {
-    if (!runningInAndroid) {
-      return;
-    }
-
-    const status = await captureNativeNow();
-    setAutoBookkeepingSettings((previous) => ({
-      ...previous,
-      ...status,
-    }));
-  };
-
   const handleTestModelConfig = async (): Promise<LLMConfigTestResult> => testNativeModelConfig();
 
   const renderContent = () => {
@@ -563,7 +550,6 @@ const App: React.FC = () => {
             onDeleteRecurring={handleDeleteRecurring}
             onStartCaptureSession={handleStartCaptureSession}
             onStopCaptureSession={handleStopCaptureSession}
-            onCaptureNow={handleCaptureNow}
             onTestModelConfig={handleTestModelConfig}
             onRefreshAutoBookkeepingStatus={refreshAutoBookkeepingStatus}
           />

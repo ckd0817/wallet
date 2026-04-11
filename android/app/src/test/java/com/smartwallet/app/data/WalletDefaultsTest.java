@@ -14,10 +14,13 @@ public class WalletDefaultsTest {
     public void defaultStoreIncludesScreenshotBookkeepingState() {
         JSONObject store = WalletDefaults.defaultStore();
         JSONObject bookkeepingSettings = store.optJSONObject("autoBookkeepingSettings");
+        JSONObject llmConfig = store.optJSONObject("llmConfig");
 
         assertTrue(store.has("transactions"));
         assertTrue(store.has("llmConfig"));
         assertTrue(bookkeepingSettings != null);
+        assertTrue(llmConfig != null);
+        assertFalse(llmConfig.has("enabled"));
         assertFalse(bookkeepingSettings.optBoolean("sessionActive", true));
         assertFalse(bookkeepingSettings.optBoolean("notificationPermissionGranted", true));
     }
@@ -36,6 +39,24 @@ public class WalletDefaultsTest {
         assertTrue(containsCategory(mergedCategories, "daily_use"));
         assertTrue(containsCategory(mergedCategories, "sports"));
         assertEquals(14, mergedCategories.length());
+    }
+
+    @Test
+    public void ensureDefaultsStripsLegacyEnabledFlagFromLlmConfig() throws Exception {
+        JSONObject candidate = new JSONObject();
+        JSONObject llmConfig = new JSONObject();
+        llmConfig.put("apiKey", "test-key");
+        llmConfig.put("baseUrl", "https://example.com/v1");
+        llmConfig.put("modelName", "demo-model");
+        llmConfig.put("enabled", true);
+        candidate.put("llmConfig", llmConfig);
+
+        JSONObject merged = WalletDefaults.ensureDefaults(candidate);
+        JSONObject mergedLlmConfig = merged.optJSONObject("llmConfig");
+
+        assertTrue(mergedLlmConfig != null);
+        assertFalse(mergedLlmConfig.has("enabled"));
+        assertEquals("test-key", mergedLlmConfig.optString("apiKey"));
     }
 
     private static JSONObject category(String id, String name) throws Exception {

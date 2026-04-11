@@ -79,7 +79,6 @@ export interface LLMConfig {
   apiKey: string;
   baseUrl: string;
   modelName: string;
-  enabled: boolean;
   timeoutMs: number;
   capturePrompt: string;
 }
