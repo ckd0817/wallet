@@ -1,0 +1,280 @@
+import { Category, Transaction } from '../types';
+
+export type AnalysisPeriod = 'month' | 'quarter' | 'year';
+
+export interface FinancialHealth {
+  netBalance: number;
+  savingsRate: number;
+  avgDailyExpense: number;
+  expenseGrowthRate: number;
+}
+
+export interface SpendingHabit {
+  type: 'warning' | 'success' | 'info';
+  message: string;
+}
+
+export interface SpendingRecommendation {
+  message: string;
+  priority: 'high' | 'medium' | 'low';
+}
+
+export interface TopCategory {
+  name: string;
+  amount: number;
+  percentage: number;
+}
+
+export interface AnalysisSnapshot {
+  financialHealth: FinancialHealth;
+  topCategories: TopCategory[];
+  habits: SpendingHabit[];
+  recommendations: SpendingRecommendation[];
+}
+
+interface BuildAnalysisSnapshotOptions {
+  transactions: Transaction[];
+  categories: Category[];
+  period: AnalysisPeriod;
+  now?: Date;
+}
+
+const getPeriodStart = (now: Date, period: AnalysisPeriod) => {
+  const start = new Date(now);
+
+  if (period === 'month') {
+    start.setMonth(now.getMonth(), 1);
+  } else if (period === 'quarter') {
+    const quarter = Math.floor(now.getMonth() / 3);
+    start.setMonth(quarter * 3, 1);
+  } else {
+    start.setMonth(0, 1);
+  }
+
+  start.setHours(0, 0, 0, 0);
+  return start;
+};
+
+const getPreviousPeriodStart = (periodStart: Date, period: AnalysisPeriod) => {
+  const previous = new Date(periodStart);
+
+  if (period === 'month') {
+    previous.setMonth(previous.getMonth() - 1);
+  } else if (period === 'quarter') {
+    previous.setMonth(previous.getMonth() - 3);
+  } else {
+    previous.setFullYear(previous.getFullYear() - 1);
+  }
+
+  return previous;
+};
+
+const getDaysInPeriod = (period: AnalysisPeriod) => {
+  if (period === 'month') {
+    return 30;
+  }
+  if (period === 'quarter') {
+    return 90;
+  }
+  return 365;
+};
+
+export const buildAnalysisSnapshot = ({
+  transactions,
+  categories,
+  period,
+  now = new Date(),
+}: BuildAnalysisSnapshotOptions): AnalysisSnapshot => {
+  const periodStart = getPeriodStart(now, period);
+  const previousPeriodStart = getPreviousPeriodStart(periodStart, period);
+
+  const currentTransactions = transactions.filter((transaction) => new Date(transaction.date) >= periodStart);
+  const previousTransactions = transactions.filter((transaction) => {
+    const date = new Date(transaction.date);
+    return date >= previousPeriodStart && date < periodStart;
+  });
+
+  const currentIncome = currentTransactions
+    .filter((transaction) => transaction.type === 'income')
+    .reduce((sum, transaction) => sum + transaction.amount, 0);
+  const currentExpense = currentTransactions
+    .filter((transaction) => transaction.type === 'expense')
+    .reduce((sum, transaction) => sum + transaction.amount, 0);
+  const previousExpense = previousTransactions
+    .filter((transaction) => transaction.type === 'expense')
+    .reduce((sum, transaction) => sum + transaction.amount, 0);
+
+  const financialHealth: FinancialHealth = {
+    netBalance: currentIncome - currentExpense,
+    savingsRate: currentIncome > 0 ? ((currentIncome - currentExpense) / currentIncome) * 100 : 0,
+    avgDailyExpense: currentExpense / getDaysInPeriod(period),
+    expenseGrowthRate: previousExpense > 0 ? ((currentExpense - previousExpense) / previousExpense) * 100 : 0,
+  };
+
+  const periodTransactions = currentTransactions.filter((transaction) => transaction.type === 'expense');
+  const categoryTotals = periodTransactions.reduce<Record<string, number>>((accumulator, transaction) => {
+    const categoryName = categories.find((category) => category.id === transaction.categoryId)?.name ?? '未知';
+    accumulator[categoryName] = (accumulator[categoryName] ?? 0) + transaction.amount;
+    return accumulator;
+  }, {});
+  const totalExpense = Object.values(categoryTotals).reduce((sum, value) => sum + value, 0);
+
+  const dailyExpenses = periodTransactions.reduce<Record<string, number>>((accumulator, transaction) => {
+    const dateKey = transaction.date.split('T')[0];
+    accumulator[dateKey] = (accumulator[dateKey] ?? 0) + transaction.amount;
+    return accumulator;
+  }, {});
+
+  const dailyAmounts = Object.values(dailyExpenses);
+  const avgDailySpend = dailyAmounts.length > 0 ? dailyAmounts.reduce((sum, value) => sum + value, 0) / dailyAmounts.length : 0;
+  const spendingVariance =
+    dailyAmounts.length > 1
+      ? dailyAmounts.reduce((sum, value) => sum + Math.pow(value - avgDailySpend, 2), 0) / (dailyAmounts.length - 1)
+      : 0;
+  const spendingStdDev = Math.sqrt(spendingVariance);
+  const spendingVolatility = avgDailySpend > 0 ? (spendingStdDev / avgDailySpend) * 100 : 0;
+
+  const topCategories = Object.entries(categoryTotals)
+    .sort(([, left], [, right]) => right - left)
+    .slice(0, 5)
+    .map(([name, amount]) => ({
+      name,
+      amount,
+      percentage: totalExpense > 0 ? (amount / totalExpense) * 100 : 0,
+    }));
+
+  const habits: SpendingHabit[] = [];
+  const recommendations: SpendingRecommendation[] = [];
+
+  if (spendingVolatility > 80) {
+    habits.push({ type: 'warning', message: '每日消费波动很大，缺乏规律' });
+    recommendations.push({ message: '尝试制定每日消费预算，减少冲动消费', priority: 'medium' });
+  } else if (spendingVolatility > 50) {
+    habits.push({ type: 'info', message: '消费波动较大，偶尔有大额支出' });
+    recommendations.push({ message: '大额消费前多思考，避免不必要的支出', priority: 'low' });
+  } else if (spendingVolatility < 30 && avgDailySpend > 0) {
+    habits.push({ type: 'success', message: '消费很稳定，有良好的理财习惯' });
+  }
+
+  const maxDailySpend = Math.max(...dailyAmounts, 0);
+  if (maxDailySpend > avgDailySpend * 3 && avgDailySpend > 0) {
+    habits.push({ type: 'warning', message: '存在单日消费过高的情况' });
+    recommendations.push({ message: '分析高额消费日的原因，避免重复类似支出', priority: 'medium' });
+  } else if (maxDailySpend > avgDailySpend * 2 && avgDailySpend > 0) {
+    habits.push({ type: 'info', message: '偶尔有单日较高消费，需要注意' });
+  }
+
+  const totalDays = getDaysInPeriod(period);
+  const zeroSpendingDays = Math.max(0, totalDays - dailyAmounts.length);
+  const zeroSpendingRate = (zeroSpendingDays / totalDays) * 100;
+
+  if (zeroSpendingRate > 50) {
+    habits.push({ type: 'info', message: `${zeroSpendingDays}天无消费记录，节约意识很强` });
+  } else if (zeroSpendingRate < 10 && dailyAmounts.length > 20) {
+    habits.push({ type: 'info', message: '几乎每天都有消费，考虑安排无消费日' });
+    recommendations.push({ message: '尝试设定每周1-2个无消费日，培养节约习惯', priority: 'low' });
+  }
+
+  if (financialHealth.savingsRate < -10) {
+    habits.push({ type: 'warning', message: '严重透支，支出远超收入' });
+    recommendations.push({ message: '立即制定紧缩预算，削减所有非必要开支', priority: 'high' });
+  } else if (financialHealth.savingsRate < 0) {
+    habits.push({ type: 'warning', message: '入不敷出，本月支出超过收入' });
+    recommendations.push({ message: '建议暂停娱乐消费，优先保障基本生活', priority: 'high' });
+  } else if (financialHealth.savingsRate < 10) {
+    habits.push({ type: 'info', message: '储蓄率偏低，几乎没有结余' });
+    recommendations.push({ message: '设定月储蓄目标，哪怕只储蓄收入的5%', priority: 'medium' });
+  } else if (financialHealth.savingsRate < 20) {
+    habits.push({ type: 'info', message: '储蓄率一般，还有提升空间' });
+    recommendations.push({ message: '尝试减少10%的日常开销，增加储蓄比例', priority: 'medium' });
+  } else if (financialHealth.savingsRate < 30) {
+    habits.push({ type: 'success', message: '储蓄状况不错，继续保持' });
+    recommendations.push({ message: '考虑建立应急基金，储备3-6个月生活费', priority: 'low' });
+  } else {
+    habits.push({ type: 'success', message: '储蓄率优秀，财务状况非常健康' });
+    recommendations.push({ message: '探索理财投资机会，让资金保值增值', priority: 'low' });
+  }
+
+  if (financialHealth.expenseGrowthRate > 50) {
+    habits.push({ type: 'warning', message: '支出激增！本月消费大幅上涨' });
+    recommendations.push({ message: '立即审查本月所有大额支出，找出超支原因', priority: 'high' });
+  } else if (financialHealth.expenseGrowthRate > 30) {
+    habits.push({ type: 'warning', message: '支出增长较快，需要关注' });
+    recommendations.push({ message: '对比上月消费，识别异常增长类别', priority: 'high' });
+  } else if (financialHealth.expenseGrowthRate > 15) {
+    habits.push({ type: 'info', message: '支出有所增加，注意控制' });
+    recommendations.push({ message: '适度控制非必需消费，避免持续增长', priority: 'medium' });
+  } else if (financialHealth.expenseGrowthRate > 5) {
+    habits.push({ type: 'info', message: '支出温和增长，在正常范围内' });
+  } else if (financialHealth.expenseGrowthRate > -5) {
+    habits.push({ type: 'success', message: '支出保持稳定，控制得不错' });
+  } else if (financialHealth.expenseGrowthRate > -15) {
+    habits.push({ type: 'success', message: '支出有所下降，节约效果明显' });
+    recommendations.push({ message: '继续保持良好的消费习惯', priority: 'low' });
+  } else {
+    habits.push({ type: 'success', message: '支出大幅减少，节约非常成功' });
+    recommendations.push({ message: '可以适当提升生活品质，但保持理性消费', priority: 'low' });
+  }
+
+  if (topCategories.length >= 3) {
+    const topThreePercentage = topCategories.slice(0, 3).reduce((sum, category) => sum + category.percentage, 0);
+    if (topThreePercentage > 80) {
+      habits.push({ type: 'info', message: '支出过于集中，前三大类占比过高' });
+      recommendations.push({ message: '尝试多元化消费，探索新的支出类别', priority: 'medium' });
+    } else if (topThreePercentage < 50) {
+      habits.push({ type: 'success', message: '支出分布均衡，消费结构合理' });
+    }
+  }
+
+  if (topCategories.length > 0) {
+    if (topCategories[0].percentage > 60) {
+      habits.push({ type: 'warning', message: `${topCategories[0].name} 占比过高（${topCategories[0].percentage.toFixed(1)}%）` });
+      recommendations.push({ message: `重点审视${topCategories[0].name}支出，寻找优化空间`, priority: 'high' });
+    } else if (topCategories[0].percentage > 40) {
+      habits.push({ type: 'info', message: `${topCategories[0].name} 是主要支出类别（${topCategories[0].percentage.toFixed(1)}%）` });
+      recommendations.push({ message: `适当控制${topCategories[0].name}支出比例`, priority: 'medium' });
+    }
+
+    if (topCategories.length >= 2 && topCategories[1].percentage > 25) {
+      habits.push({ type: 'info', message: `${topCategories[1].name} 支出占比较大（${topCategories[1].percentage.toFixed(1)}%）` });
+    }
+  }
+
+  if (financialHealth.netBalance > 0 && financialHealth.savingsRate > 10) {
+    if (financialHealth.netBalance > 10000) {
+      recommendations.push({ message: '可以考虑将部分结余用于定期存款或低风险理财', priority: 'low' });
+    }
+    if (zeroSpendingRate < 30) {
+      recommendations.push({ message: '周末尝试自制餐食，既能节省开支又健康', priority: 'low' });
+    }
+  }
+
+  if (avgDailySpend > 500) {
+    recommendations.push({ message: '每日平均支出较高，考虑使用优惠券和折扣', priority: 'medium' });
+  }
+
+  if (periodTransactions.length > 50) {
+    const categoryFrequency = periodTransactions.reduce<Record<string, number>>((accumulator, transaction) => {
+      const categoryName = categories.find((category) => category.id === transaction.categoryId)?.name ?? '未知';
+      accumulator[categoryName] = (accumulator[categoryName] ?? 0) + 1;
+      return accumulator;
+    }, {});
+
+    const mostFrequentCategory = Object.entries(categoryFrequency).sort(([, left], [, right]) => right - left)[0];
+    if (mostFrequentCategory && mostFrequentCategory[1] > 15) {
+      recommendations.push({ message: `${mostFrequentCategory[0]}消费频率很高，考虑是否有更经济的选择`, priority: 'medium' });
+    }
+  }
+
+  if (recommendations.length === 0) {
+    habits.push({ type: 'success', message: '理财状况非常理想，继续保持优秀习惯' });
+    recommendations.push({ message: '考虑设定更高的财务目标，挑战自我', priority: 'low' });
+  }
+
+  return {
+    financialHealth,
+    topCategories,
+    habits,
+    recommendations,
+  };
+};

@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { Transaction, Category } from '../types';
 import { getIconComponent } from '../constants';
-import { Trash2, ChevronLeft, ChevronRight, Ban } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Ban } from 'lucide-react';
 
 interface DashboardProps {
   transactions: Transaction[];
@@ -148,8 +148,19 @@ const Dashboard: React.FC<DashboardProps> = ({ transactions, categories, onDelet
                                                 <Icon className="w-6 h-6" strokeWidth={1.5} />
                                             </div>
                                             <div className="min-w-0 flex flex-col gap-0.5">
-                                                <p className="text-base font-medium text-primary truncate">{category?.name}</p>
-                                                {t.note && <p className="text-xs text-zinc-400 truncate max-w-[150px]">{t.note}</p>}
+                                                <div className="flex items-center gap-2 flex-wrap">
+                                                  <p className="text-base font-medium text-primary truncate">{category?.name}</p>
+                                                  {t.createdBy === 'screenshot_capture' && (
+                                                    <span className="text-[11px] px-2 py-0.5 rounded-full bg-zinc-100 text-zinc-500">截图</span>
+                                                  )}
+                                                  {t.needsReview && (
+                                                    <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">待复核</span>
+                                                  )}
+                                                </div>
+                                                {t.note && <p className="text-xs text-zinc-400 truncate max-w-[180px]">{t.note}</p>}
+                                                {t.merchantName && t.createdBy === 'screenshot_capture' && (
+                                                  <p className="text-xs text-zinc-300 truncate max-w-[180px]">{t.merchantName}</p>
+                                                )}
                                             </div>
                                         </div>
                                         <span className={`font-medium text-base tabular-nums tracking-tight ${

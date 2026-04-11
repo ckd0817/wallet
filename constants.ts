@@ -11,6 +11,8 @@ export const DEFAULT_CATEGORIES: Category[] = [
   { id: 'entertainment', name: '娱乐', icon: 'Clapperboard', color: '#0891b2', type: 'expense' }, // Cyan 600
   { id: 'health', name: '医疗', icon: 'HeartPulse', color: '#be123c', type: 'expense' }, // Rose 700
   { id: 'education', name: '教育', icon: 'GraduationCap', color: '#7c3aed', type: 'expense' }, // Violet 600
+  { id: 'daily_use', name: '日用', icon: 'Coffee', color: '#d97706', type: 'expense' }, // Amber 600
+  { id: 'sports', name: '运动', icon: 'Star', color: '#2563eb', type: 'expense' }, // Blue 600
   { id: 'other_exp', name: '其他支出', icon: 'MoreHorizontal', color: '#71717a', type: 'expense' }, // Zinc 500
   
   // Income
@@ -19,6 +21,22 @@ export const DEFAULT_CATEGORIES: Category[] = [
   { id: 'investment', name: '理财', icon: 'PiggyBank', color: '#4338ca', type: 'income' }, // Indigo 700
   { id: 'other_inc', name: '其他收入', icon: 'MoreHorizontal', color: '#52525b', type: 'income' }, // Zinc 600
 ];
+
+export const mergeDefaultCategories = (categories: Category[] = []): Category[] => {
+  if (categories.length === 0) {
+    return DEFAULT_CATEGORIES;
+  }
+
+  const merged = categories.map((category) => {
+    const fallback = DEFAULT_CATEGORIES.find((item) => item.id === category.id);
+    return fallback ? { ...fallback, ...category, name: fallback.name } : category;
+  });
+
+  const existingIds = new Set(merged.map((category) => category.id));
+  const missingDefaults = DEFAULT_CATEGORIES.filter((category) => !existingIds.has(category.id));
+
+  return [...merged, ...missingDefaults];
+};
 
 export const getIconComponent = (iconName: string) => {
   switch (iconName) {
