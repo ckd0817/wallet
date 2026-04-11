@@ -165,6 +165,7 @@ public class ScreenCaptureBookkeepingPlugin extends Plugin {
 
     private JSObject buildStatus() {
         boolean notificationsGranted = NotificationHelper.isNotificationPermissionGranted(getContext());
+        boolean serviceRunning = ScreenCaptureBookkeepingService.isRunning();
         JSONObject settings = repository().getAutoBookkeepingSettings();
         JSONObject updates = new JSONObject();
         boolean shouldPersist = false;
@@ -173,8 +174,8 @@ public class ScreenCaptureBookkeepingPlugin extends Plugin {
             safePut(updates, "notificationPermissionGranted", notificationsGranted);
             shouldPersist = true;
         }
-        if (settings.optBoolean("sessionActive", false) && !ScreenCaptureBookkeepingService.isRunning()) {
-            safePut(updates, "sessionActive", false);
+        if (settings.optBoolean("sessionActive", false) != serviceRunning) {
+            safePut(updates, "sessionActive", serviceRunning);
             shouldPersist = true;
         }
 
