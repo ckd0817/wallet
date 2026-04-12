@@ -10,6 +10,7 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Build;
+import android.service.notification.StatusBarNotification;
 import androidx.core.app.NotificationCompat;
 import androidx.core.app.NotificationManagerCompat;
 import androidx.core.content.ContextCompat;
@@ -51,6 +52,33 @@ public final class NotificationHelper {
         return NotificationManagerCompat.from(context).areNotificationsEnabled();
     }
 
+    public static boolean hasActiveSessionNotification(Context context) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+            return false;
+        }
+
+        NotificationManager notificationManager = context.getSystemService(NotificationManager.class);
+        if (notificationManager == null) {
+            return false;
+        }
+
+        StatusBarNotification[] activeNotifications = notificationManager.getActiveNotifications();
+        if (activeNotifications == null) {
+            return false;
+        }
+
+        for (StatusBarNotification notification : activeNotifications) {
+            if (notification == null) {
+                continue;
+            }
+            if (SESSION_NOTIFICATION_ID == notification.getId() && context.getPackageName().equals(notification.getPackageName())) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public static Notification buildSessionNotification(Context context, boolean captureInProgress) {
         PendingIntent captureIntent = PendingIntent.getService(
             context,
@@ -64,18 +92,15 @@ public final class NotificationHelper {
             new Intent(context, ScreenCaptureBookkeepingService.class).setAction(ScreenCaptureBookkeepingService.ACTION_STOP_SESSION),
             pendingIntentFlags()
         );
+        String sessionText = captureInProgress
+            ? context.getString(R.string.screen_capture_notification_progress_text)
+            : context.getString(R.string.screen_capture_notification_text);
 
         return new NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_menu_camera)
             .setContentTitle(context.getString(R.string.screen_capture_notification_title))
-            .setContentText(
-                captureInProgress ? "正在分析最新截图，请稍候。" : context.getString(R.string.screen_capture_notification_text)
-            )
-            .setStyle(
-                new NotificationCompat.BigTextStyle().bigText(
-                    captureInProgress ? "正在分析最新截图，请稍候。" : context.getString(R.string.screen_capture_notification_text)
-                )
-            )
+            .setContentText(sessionText)
+            .setStyle(new NotificationCompat.BigTextStyle().bigText(sessionText))
             .setContentIntent(captureIntent)
             .setOngoing(true)
             .setOnlyAlertOnce(true)

@@ -5,6 +5,7 @@ import android.app.Activity;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Build;
+import android.util.Log;
 import androidx.activity.result.ActivityResult;
 import androidx.annotation.Nullable;
 import com.getcapacitor.JSObject;
@@ -31,6 +32,7 @@ import org.json.JSONObject;
 )
 public class ScreenCaptureBookkeepingPlugin extends Plugin {
 
+    private static final String TAG = "SmartWalletCapture";
     private static final AtomicReference<WeakReference<ScreenCaptureBookkeepingPlugin>> ACTIVE_INSTANCE = new AtomicReference<>();
     private static volatile String pendingDeepLink;
     private final CaptureAnalysisClient analysisClient = new CaptureAnalysisClient();
@@ -166,6 +168,8 @@ public class ScreenCaptureBookkeepingPlugin extends Plugin {
     private JSObject buildStatus() {
         boolean notificationsGranted = NotificationHelper.isNotificationPermissionGranted(getContext());
         boolean serviceRunning = ScreenCaptureBookkeepingService.isRunning();
+        boolean notificationPresent = NotificationHelper.hasActiveSessionNotification(getContext());
+        boolean resolvedSessionActive = serviceRunning || notificationPresent;
         JSONObject settings = repository().getAutoBookkeepingSettings();
         JSONObject updates = new JSONObject();
         boolean shouldPersist = false;
@@ -174,10 +178,20 @@ public class ScreenCaptureBookkeepingPlugin extends Plugin {
             safePut(updates, "notificationPermissionGranted", notificationsGranted);
             shouldPersist = true;
         }
-        if (settings.optBoolean("sessionActive", false) != serviceRunning) {
-            safePut(updates, "sessionActive", serviceRunning);
+        if (settings.optBoolean("sessionActive", false) != resolvedSessionActive) {
+            safePut(updates, "sessionActive", resolvedSessionActive);
             shouldPersist = true;
         }
+
+        Log.i(
+            TAG,
+            "buildStatus serviceRunning=" +
+            serviceRunning +
+            ", notificationPresent=" +
+            notificationPresent +
+            ", resolvedSessionActive=" +
+            resolvedSessionActive
+        );
 
         if (shouldPersist) {
             settings = repository().saveAutoBookkeepingSettings(updates);

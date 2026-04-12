@@ -6,8 +6,9 @@
     <string name="custom_url_scheme">com.smartwallet.app</string>
     <string name="screen_capture_channel_name">截图自动记账</string>
     <string name="screen_capture_channel_description">显示截图会话状态和自动记账结果。</string>
-    <string name="screen_capture_notification_title">截图自动记账进行中</string>
-    <string name="screen_capture_notification_text">保持在付款结果页，点这条通知即可截图识别；截图成功后会话保持开启，展开通知可停止会话。</string>
+    <string name="screen_capture_notification_title">截图记账已开启</string>
+    <string name="screen_capture_notification_text">点通知即可截图记账</string>
+    <string name="screen_capture_notification_progress_text">正在识别截图</string>
     <string name="screen_capture_capture_action">截屏记账</string>
     <string name="screen_capture_stop_action">停止会话</string>
     <string name="screen_capture_success_title">已自动记账</string>
