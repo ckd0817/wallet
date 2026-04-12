@@ -1,26 +1,21 @@
 package com.smartwallet.app;
 
 import android.Manifest;
-import android.app.Activity;
 import android.content.Intent;
 import android.net.Uri;
-import android.os.Build;
+import android.provider.Settings;
 import android.util.Log;
-import androidx.activity.result.ActivityResult;
 import androidx.annotation.Nullable;
 import com.getcapacitor.JSObject;
-import com.getcapacitor.PermissionState;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
-import com.getcapacitor.annotation.ActivityCallback;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.annotation.Permission;
-import com.getcapacitor.annotation.PermissionCallback;
+import com.smartwallet.app.accessibility.AccessibilityCaptureService;
 import com.smartwallet.app.data.WalletRepository;
 import com.smartwallet.app.screencapture.CaptureAnalysisClient;
 import com.smartwallet.app.screencapture.NotificationHelper;
-import com.smartwallet.app.screencapture.ScreenCaptureBookkeepingService;
 import java.lang.ref.WeakReference;
 import java.util.concurrent.atomic.AtomicReference;
 import org.json.JSONException;
@@ -41,6 +36,7 @@ public class ScreenCaptureBookkeepingPlugin extends Plugin {
     public void load() {
         super.load();
         NotificationHelper.ensureChannels(getContext());
+        AccessibilityCaptureService.syncReadyNotification(getContext());
         ACTIVE_INSTANCE.set(new WeakReference<>(this));
         if (pendingDeepLink != null) {
             emitDeepLink(pendingDeepLink);
@@ -62,28 +58,16 @@ public class ScreenCaptureBookkeepingPlugin extends Plugin {
     }
 
     @PluginMethod
-    public void startSession(PluginCall call) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && getPermissionState("notifications") != PermissionState.GRANTED) {
-            requestPermissionForAlias("notifications", call, "handleNotificationPermissionThenStart");
-            return;
-        }
-        launchProjectionConsent(call);
-    }
-
-    @PermissionCallback
-    private void handleNotificationPermissionThenStart(PluginCall call) {
-        launchProjectionConsent(call);
-    }
-
-    @PluginMethod
-    public void stopSession(PluginCall call) {
-        ScreenCaptureBookkeepingService.stopSession(getContext());
+    public void openAccessibilitySettings(PluginCall call) {
+        Intent intent = new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS);
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        getContext().startActivity(intent);
         call.resolve(buildStatus());
     }
 
     @PluginMethod
     public void captureNow(PluginCall call) {
-        ScreenCaptureBookkeepingService.captureNow(getContext());
+        AccessibilityCaptureService.requestCapture(getContext());
         call.resolve(buildStatus());
     }
 
@@ -99,25 +83,6 @@ public class ScreenCaptureBookkeepingPlugin extends Plugin {
         JSObject response = new JSObject();
         response.put("url", current);
         call.resolve(response);
-    }
-
-    @ActivityCallback
-    private void handleProjectionConsent(PluginCall call, ActivityResult result) {
-        if (call == null) {
-            return;
-        }
-
-        if (result.getResultCode() != Activity.RESULT_OK || result.getData() == null) {
-            repository().saveAutoBookkeepingSettings(singleton("lastError", "未授予截图权限"));
-            JSObject status = buildStatus();
-            emitStatusChanged(toJson(status));
-            call.resolve(status);
-            return;
-        }
-
-        repository().saveAutoBookkeepingSettings(singleton("lastError", ""));
-        ScreenCaptureBookkeepingService.startSession(getContext(), result.getResultCode(), result.getData());
-        call.resolve(buildStatus());
     }
 
     public static void handleIncomingIntent(@Nullable Intent intent) {
@@ -156,20 +121,9 @@ public class ScreenCaptureBookkeepingPlugin extends Plugin {
         plugin.getActivity().runOnUiThread(() -> plugin.notifyListeners("statusChanged", payload, true));
     }
 
-    private void launchProjectionConsent(PluginCall call) {
-        Intent intent = ScreenCaptureBookkeepingService.createProjectionConsentIntent(getContext());
-        if (intent == null) {
-            call.reject("media projection manager unavailable");
-            return;
-        }
-        startActivityForResult(call, intent, "handleProjectionConsent");
-    }
-
     private JSObject buildStatus() {
         boolean notificationsGranted = NotificationHelper.isNotificationPermissionGranted(getContext());
-        boolean serviceRunning = ScreenCaptureBookkeepingService.isRunning();
-        boolean notificationPresent = NotificationHelper.hasActiveSessionNotification(getContext());
-        boolean resolvedSessionActive = serviceRunning || notificationPresent;
+        boolean accessibilityEnabled = AccessibilityCaptureService.isEnabledInSystem(getContext());
         JSONObject settings = repository().getAutoBookkeepingSettings();
         JSONObject updates = new JSONObject();
         boolean shouldPersist = false;
@@ -178,19 +132,21 @@ public class ScreenCaptureBookkeepingPlugin extends Plugin {
             safePut(updates, "notificationPermissionGranted", notificationsGranted);
             shouldPersist = true;
         }
-        if (settings.optBoolean("sessionActive", false) != resolvedSessionActive) {
-            safePut(updates, "sessionActive", resolvedSessionActive);
+        if (settings.optBoolean("accessibilityEnabled", false) != accessibilityEnabled) {
+            safePut(updates, "accessibilityEnabled", accessibilityEnabled);
             shouldPersist = true;
         }
 
+        AccessibilityCaptureService.syncReadyNotification(getContext());
+
         Log.i(
             TAG,
-            "buildStatus serviceRunning=" +
-            serviceRunning +
-            ", notificationPresent=" +
-            notificationPresent +
-            ", resolvedSessionActive=" +
-            resolvedSessionActive
+            "buildStatus accessibilityEnabled=" +
+            accessibilityEnabled +
+            ", notificationPermissionGranted=" +
+            notificationsGranted +
+            ", readyNotificationPresent=" +
+            NotificationHelper.hasActiveReadyNotification(getContext())
         );
 
         if (shouldPersist) {
@@ -204,12 +160,6 @@ public class ScreenCaptureBookkeepingPlugin extends Plugin {
         return WalletRepository.getInstance(getContext());
     }
 
-    private JSONObject singleton(String key, Object value) {
-        JSONObject object = new JSONObject();
-        safePut(object, key, value);
-        return object;
-    }
-
     private void safePut(JSONObject object, String key, Object value) {
         try {
             object.put(key, value);
@@ -221,14 +171,6 @@ public class ScreenCaptureBookkeepingPlugin extends Plugin {
             return JSObject.fromJSONObject(object);
         } catch (JSONException exception) {
             return new JSObject();
-        }
-    }
-
-    private JSONObject toJson(JSObject object) {
-        try {
-            return new JSONObject(object.toString());
-        } catch (JSONException ignored) {
-            return new JSONObject();
         }
     }
 

@@ -1,8 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
@@ -39,9 +37,24 @@
         </activity>
 
         <service
-            android:name=".screencapture.ScreenCaptureBookkeepingService"
+            android:name=".accessibility.AccessibilityCaptureService"
+            android:enabled="true"
             android:exported="false"
-            android:foregroundServiceType="mediaProjection" />
+            android:label="@string/accessibility_capture_service_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_capture_service" />
+        </service>
+
+        <receiver
+            android:name=".accessibility.AccessibilityCaptureActionReceiver"
+            android:enabled="true"
+            android:exported="false" />
 
         <provider
             android:name="androidx.core.content.FileProvider"

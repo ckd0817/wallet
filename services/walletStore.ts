@@ -36,8 +36,7 @@ interface WalletDataPlugin {
 
 interface ScreenCaptureBookkeepingPlugin {
   getStatus(): Promise<AutoBookkeepingSettings>;
-  startSession(): Promise<AutoBookkeepingSettings>;
-  stopSession(): Promise<AutoBookkeepingSettings>;
+  openAccessibilitySettings(): Promise<AutoBookkeepingSettings>;
   captureNow(): Promise<AutoBookkeepingSettings>;
   testModelConfig(): Promise<LLMConfigTestResult>;
   consumePendingDeepLink(): Promise<{ url?: string }>;
@@ -81,7 +80,7 @@ export const defaultLlmConfig = (): LLMConfig => ({
 });
 
 export const defaultAutoBookkeepingSettings = (): AutoBookkeepingSettings => ({
-  sessionActive: false,
+  accessibilityEnabled: false,
   notificationPermissionGranted: false,
   lastCaptureAt: 0,
   lastError: '',
@@ -122,6 +121,24 @@ const normalizeCaptureLogs = (captureLogs?: CaptureAttemptLog[] | null) =>
       )
     : [];
 
+const normalizeAutoBookkeepingSettings = (
+  autoBookkeepingSettings?: Partial<AutoBookkeepingSettings> | Record<string, unknown> | null,
+): AutoBookkeepingSettings => {
+  const defaults = defaultAutoBookkeepingSettings();
+  const merged = autoBookkeepingSettings ?? {};
+
+  return {
+    accessibilityEnabled:
+      typeof merged.accessibilityEnabled === 'boolean' ? merged.accessibilityEnabled : defaults.accessibilityEnabled,
+    notificationPermissionGranted:
+      typeof merged.notificationPermissionGranted === 'boolean'
+        ? merged.notificationPermissionGranted
+        : defaults.notificationPermissionGranted,
+    lastCaptureAt: typeof merged.lastCaptureAt === 'number' ? merged.lastCaptureAt : defaults.lastCaptureAt,
+    lastError: typeof merged.lastError === 'string' ? merged.lastError : defaults.lastError,
+  };
+};
+
 const parseStoredValue = <T>(key: string, fallback: T): T => {
   const raw = localStorage.getItem(key);
   if (!raw) {
@@ -148,10 +165,9 @@ export const loadWebSnapshot = (): WalletSnapshot => {
     categories: mergeDefaultCategories(storedCategories),
     recurringProfiles: parseStoredValue<RecurringProfile[]>(STORAGE_KEYS.recurringProfiles, []),
     llmConfig: normalizeLlmConfig(parseStoredValue<Partial<LLMConfig>>(STORAGE_KEYS.llmConfig, {})),
-    autoBookkeepingSettings: {
-      ...snapshot.autoBookkeepingSettings,
-      ...parseStoredValue<Partial<AutoBookkeepingSettings>>(STORAGE_KEYS.autoBookkeepingSettings, {}),
-    },
+    autoBookkeepingSettings: normalizeAutoBookkeepingSettings(
+      parseStoredValue<Record<string, unknown>>(STORAGE_KEYS.autoBookkeepingSettings, {}),
+    ),
   };
 };
 
@@ -183,10 +199,7 @@ export const normalizeSnapshot = (snapshot?: Partial<WalletSnapshot> | null): Wa
     categories: normalizedCategoryState.categories,
     recurringProfiles: normalizedCategoryState.recurringProfiles,
     llmConfig: normalizeLlmConfig(snapshot?.llmConfig ?? {}),
-    autoBookkeepingSettings: {
-      ...defaults.autoBookkeepingSettings,
-      ...(snapshot?.autoBookkeepingSettings ?? {}),
-    },
+    autoBookkeepingSettings: normalizeAutoBookkeepingSettings(snapshot?.autoBookkeepingSettings ?? {}),
   };
 };
 
@@ -227,25 +240,14 @@ export const getNativeAutoBookkeepingStatus = async () => {
   };
 };
 
-export const startNativeCaptureSession = async () => {
+export const openNativeAccessibilitySettings = async () => {
   if (!isAndroidNative()) {
     return defaultAutoBookkeepingSettings();
   }
 
   return {
     ...defaultAutoBookkeepingSettings(),
-    ...(await ScreenCaptureBookkeeping.startSession()),
-  };
-};
-
-export const stopNativeCaptureSession = async () => {
-  if (!isAndroidNative()) {
-    return defaultAutoBookkeepingSettings();
-  }
-
-  return {
-    ...defaultAutoBookkeepingSettings(),
-    ...(await ScreenCaptureBookkeeping.stopSession()),
+    ...(await ScreenCaptureBookkeeping.openAccessibilitySettings()),
   };
 };
 

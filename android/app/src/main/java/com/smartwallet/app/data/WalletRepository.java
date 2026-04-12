@@ -152,6 +152,7 @@ public class WalletRepository {
                     safePut(merged, key, updates.opt(key));
                 }
             }
+            merged.remove("sessionActive");
             safePut(store, "autoBookkeepingSettings", merged);
             writeStoreLocked(store);
             return cloneObject(store);

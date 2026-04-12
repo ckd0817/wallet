@@ -50,7 +50,7 @@ public final class WalletDefaults {
 
     public static JSONObject defaultAutoBookkeepingSettings() {
         JSONObject object = new JSONObject();
-        safePut(object, "sessionActive", false);
+        safePut(object, "accessibilityEnabled", false);
         safePut(object, "notificationPermissionGranted", false);
         safePut(object, "lastCaptureAt", 0);
         safePut(object, "lastError", "");
@@ -80,6 +80,7 @@ public final class WalletDefaults {
 
         JSONObject bookkeepingSettings = cloneObject(defaultAutoBookkeepingSettings());
         mergeInto(bookkeepingSettings, candidate.optJSONObject("autoBookkeepingSettings"));
+        bookkeepingSettings.remove("sessionActive");
         safePut(merged, "autoBookkeepingSettings", bookkeepingSettings);
 
         return merged;

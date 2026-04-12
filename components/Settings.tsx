@@ -11,9 +11,7 @@ import {
   Clock3,
   Download,
   Eye,
-  Play,
   RefreshCcw,
-  Square,
   Trash2,
   Upload,
 } from 'lucide-react';
@@ -43,8 +41,7 @@ interface SettingsProps {
   onImport: (data: WalletBackupData, mode: 'append' | 'overwrite') => void;
   onDeleteRecurring: (id: string) => void;
   onUpdateLLMConfig: (config: LLMConfig) => void;
-  onStartCaptureSession: () => Promise<void> | void;
-  onStopCaptureSession: () => Promise<void> | void;
+  onOpenAccessibilitySettings: () => Promise<void> | void;
   onTestModelConfig: () => Promise<LLMConfigTestResult> | LLMConfigTestResult;
   onRefreshAutoBookkeepingStatus: () => Promise<void> | void;
 }
@@ -59,16 +56,14 @@ const Settings: React.FC<SettingsProps> = ({
   onImport,
   onDeleteRecurring,
   onUpdateLLMConfig,
-  onStartCaptureSession,
-  onStopCaptureSession,
+  onOpenAccessibilitySettings,
   onTestModelConfig,
   onRefreshAutoBookkeepingStatus,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [importMode, setImportMode] = useState<'append' | 'overwrite'>('append');
   const [isRefreshingStatus, setIsRefreshingStatus] = useState(false);
-  const [isStartingSession, setIsStartingSession] = useState(false);
-  const [isStoppingSession, setIsStoppingSession] = useState(false);
+  const [isOpeningAccessibilitySettings, setIsOpeningAccessibilitySettings] = useState(false);
   const [isTestingModel, setIsTestingModel] = useState(false);
   const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
   const [modelTestResult, setModelTestResult] = useState<LLMConfigTestResult | null>(null);
@@ -86,8 +81,8 @@ const Settings: React.FC<SettingsProps> = ({
     () => [
       {
         icon: Eye,
-        label: '截图会话',
-        value: autoBookkeepingSettings.sessionActive ? '进行中' : '未开启',
+        label: '无障碍服务',
+        value: autoBookkeepingSettings.accessibilityEnabled ? '已开启' : '未开启',
       },
       {
         icon: Bell,
@@ -107,7 +102,7 @@ const Settings: React.FC<SettingsProps> = ({
     ],
     [
       autoBookkeepingSettings.notificationPermissionGranted,
-      autoBookkeepingSettings.sessionActive,
+      autoBookkeepingSettings.accessibilityEnabled,
       latestCaptureText,
       llmReady,
     ],
@@ -207,21 +202,12 @@ const Settings: React.FC<SettingsProps> = ({
     }
   };
 
-  const handleStartSession = async () => {
-    setIsStartingSession(true);
+  const handleOpenAccessibility = async () => {
+    setIsOpeningAccessibilitySettings(true);
     try {
-      await onStartCaptureSession();
+      await onOpenAccessibilitySettings();
     } finally {
-      setIsStartingSession(false);
-    }
-  };
-
-  const handleStopSession = async () => {
-    setIsStoppingSession(true);
-    try {
-      await onStopCaptureSession();
-    } finally {
-      setIsStoppingSession(false);
+      setIsOpeningAccessibilitySettings(false);
     }
   };
 
@@ -252,19 +238,7 @@ const Settings: React.FC<SettingsProps> = ({
   return (
     <div className="flex flex-col h-full space-y-8 animate-slide-up pb-32">
       <section>
-        <SectionHeader
-          title="截图自动记账"
-          action={
-            <button
-              onClick={handleRefreshStatus}
-              disabled={isRefreshingStatus || !isAndroidNative}
-              className="inline-flex items-center gap-2 rounded-full border border-border bg-white px-3 py-2 text-xs font-medium text-secondary transition-colors hover:text-primary disabled:cursor-not-allowed disabled:text-zinc-300"
-            >
-              <RefreshCcw className={`w-3.5 h-3.5 ${isRefreshingStatus ? 'animate-spin' : ''}`} />
-              刷新状态
-            </button>
-          }
-        />
+        <SectionHeader title="截图自动记账" />
 
         <div className="rounded-[28px] border border-border bg-white p-5 shadow-sm sm:p-6">
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -281,20 +255,20 @@ const Settings: React.FC<SettingsProps> = ({
 
           <div className="mt-5 grid grid-cols-2 gap-3">
             <PrimaryActionButton
-              onClick={handleStartSession}
-              disabled={isStartingSession || !isAndroidNative || !llmReady}
-              icon={Play}
+              onClick={handleOpenAccessibility}
+              disabled={isOpeningAccessibilitySettings || !isAndroidNative}
+              icon={Eye}
               tone="primary"
             >
-              {isStartingSession ? '开启中...' : '开启截图模式'}
+              {isOpeningAccessibilitySettings ? '打开中...' : '去开启无障碍'}
             </PrimaryActionButton>
             <PrimaryActionButton
-              onClick={handleStopSession}
-              disabled={isStoppingSession || !isAndroidNative || !autoBookkeepingSettings.sessionActive}
-              icon={Square}
+              onClick={handleRefreshStatus}
+              disabled={isRefreshingStatus || !isAndroidNative}
+              icon={RefreshCcw}
               tone="ghost"
             >
-              {isStoppingSession ? '停止中...' : '停止'}
+              {isRefreshingStatus ? '刷新中...' : '刷新状态'}
             </PrimaryActionButton>
           </div>
         </div>

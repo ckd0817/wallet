@@ -35,15 +35,14 @@ import {
   loadNativeSnapshot,
   loadWebSnapshot,
   normalizeSnapshot,
+  openNativeAccessibilitySettings,
   saveNativeCategory,
   saveNativeLlmConfig,
   saveNativeRecurringProfile,
   saveNativeSnapshot,
   saveNativeTransaction,
   saveWebSnapshot,
-  startNativeCaptureSession,
   testNativeModelConfig,
-  stopNativeCaptureSession,
 } from './services/walletStore';
 import { mergeBackupData } from './services/dataBackup';
 
@@ -530,24 +529,12 @@ const App: React.FC = () => {
     setLlmConfig(config);
   };
 
-  const handleStartCaptureSession = async () => {
+  const handleOpenAccessibilitySettings = async () => {
     if (!runningInAndroid) {
       return;
     }
 
-    const status = await startNativeCaptureSession();
-    setAutoBookkeepingSettings((previous) => ({
-      ...previous,
-      ...status,
-    }));
-  };
-
-  const handleStopCaptureSession = async () => {
-    if (!runningInAndroid) {
-      return;
-    }
-
-    const status = await stopNativeCaptureSession();
+    const status = await openNativeAccessibilitySettings();
     setAutoBookkeepingSettings((previous) => ({
       ...previous,
       ...status,
@@ -583,8 +570,7 @@ const App: React.FC = () => {
             onUpdateLLMConfig={handleUpdateLLMConfig}
             onImport={handleImportBackup}
             onDeleteRecurring={handleDeleteRecurring}
-            onStartCaptureSession={handleStartCaptureSession}
-            onStopCaptureSession={handleStopCaptureSession}
+            onOpenAccessibilitySettings={handleOpenAccessibilitySettings}
             onTestModelConfig={handleTestModelConfig}
             onRefreshAutoBookkeepingStatus={refreshAutoBookkeepingStatus}
           />

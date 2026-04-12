@@ -21,7 +21,8 @@ public class WalletDefaultsTest {
         assertTrue(bookkeepingSettings != null);
         assertTrue(llmConfig != null);
         assertFalse(llmConfig.has("enabled"));
-        assertFalse(bookkeepingSettings.optBoolean("sessionActive", true));
+        assertFalse(bookkeepingSettings.has("sessionActive"));
+        assertFalse(bookkeepingSettings.optBoolean("accessibilityEnabled", true));
         assertFalse(bookkeepingSettings.optBoolean("notificationPermissionGranted", true));
     }
 

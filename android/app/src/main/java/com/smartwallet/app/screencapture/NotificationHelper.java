@@ -16,12 +16,14 @@ import androidx.core.app.NotificationManagerCompat;
 import androidx.core.content.ContextCompat;
 import com.smartwallet.app.MainActivity;
 import com.smartwallet.app.R;
+import com.smartwallet.app.accessibility.AccessibilityCaptureActionReceiver;
+import com.smartwallet.app.accessibility.AccessibilityCaptureService;
 import org.json.JSONObject;
 
 public final class NotificationHelper {
 
     public static final String CHANNEL_ID = "screen_capture_bookkeeping";
-    public static final int SESSION_NOTIFICATION_ID = 31001;
+    public static final int READY_NOTIFICATION_ID = 31001;
 
     private NotificationHelper() {}
 
@@ -52,7 +54,7 @@ public final class NotificationHelper {
         return NotificationManagerCompat.from(context).areNotificationsEnabled();
     }
 
-    public static boolean hasActiveSessionNotification(Context context) {
+    public static boolean hasActiveReadyNotification(Context context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
             return false;
         }
@@ -71,7 +73,7 @@ public final class NotificationHelper {
             if (notification == null) {
                 continue;
             }
-            if (SESSION_NOTIFICATION_ID == notification.getId() && context.getPackageName().equals(notification.getPackageName())) {
+            if (READY_NOTIFICATION_ID == notification.getId() && context.getPackageName().equals(notification.getPackageName())) {
                 return true;
             }
         }
@@ -79,28 +81,34 @@ public final class NotificationHelper {
         return false;
     }
 
-    public static Notification buildSessionNotification(Context context, boolean captureInProgress) {
-        PendingIntent captureIntent = PendingIntent.getService(
+    public static void showReadyNotification(Context context, boolean captureInProgress) {
+        if (!isNotificationPermissionGranted(context)) {
+            return;
+        }
+
+        NotificationManagerCompat.from(context).notify(READY_NOTIFICATION_ID, buildReadyNotification(context, captureInProgress));
+    }
+
+    public static void cancelReadyNotification(Context context) {
+        NotificationManagerCompat.from(context).cancel(READY_NOTIFICATION_ID);
+    }
+
+    public static Notification buildReadyNotification(Context context, boolean captureInProgress) {
+        PendingIntent captureIntent = PendingIntent.getBroadcast(
             context,
             1,
-            new Intent(context, ScreenCaptureBookkeepingService.class).setAction(ScreenCaptureBookkeepingService.ACTION_CAPTURE),
+            new Intent(context, AccessibilityCaptureActionReceiver.class).setAction(AccessibilityCaptureService.ACTION_CAPTURE_NOW),
             pendingIntentFlags()
         );
-        PendingIntent stopIntent = PendingIntent.getService(
-            context,
-            2,
-            new Intent(context, ScreenCaptureBookkeepingService.class).setAction(ScreenCaptureBookkeepingService.ACTION_STOP_SESSION),
-            pendingIntentFlags()
-        );
-        String sessionText = captureInProgress
+        String notificationText = captureInProgress
             ? context.getString(R.string.screen_capture_notification_progress_text)
             : context.getString(R.string.screen_capture_notification_text);
 
         return new NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_menu_camera)
             .setContentTitle(context.getString(R.string.screen_capture_notification_title))
-            .setContentText(sessionText)
-            .setStyle(new NotificationCompat.BigTextStyle().bigText(sessionText))
+            .setContentText(notificationText)
+            .setStyle(new NotificationCompat.BigTextStyle().bigText(notificationText))
             .setContentIntent(captureIntent)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
@@ -108,7 +116,6 @@ public final class NotificationHelper {
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .addAction(android.R.drawable.ic_menu_camera, context.getString(R.string.screen_capture_capture_action), captureIntent)
-            .addAction(android.R.drawable.ic_menu_close_clear_cancel, context.getString(R.string.screen_capture_stop_action), stopIntent)
             .build();
     }
 

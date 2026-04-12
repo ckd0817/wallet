@@ -96,7 +96,7 @@ export interface LLMConfigTestResult {
 }
 
 export interface AutoBookkeepingSettings {
-  sessionActive: boolean;
+  accessibilityEnabled: boolean;
   notificationPermissionGranted: boolean;
   lastCaptureAt: number;
   lastError: string;

@@ -4,13 +4,23 @@
     <string name="title_activity_main">记账</string>
     <string name="package_name">com.smartwallet.app</string>
     <string name="custom_url_scheme">com.smartwallet.app</string>
+    <string name="accessibility_capture_service_label">截图自动记账</string>
+    <string name="accessibility_capture_service_description">开启后可通过通知栏手动触发截图自动记账。</string>
     <string name="screen_capture_channel_name">截图自动记账</string>
-    <string name="screen_capture_channel_description">显示截图会话状态和自动记账结果。</string>
-    <string name="screen_capture_notification_title">截图记账已开启</string>
+    <string name="screen_capture_channel_description">显示截图记账入口和自动记账结果。</string>
+    <string name="screen_capture_notification_title">截图记账已就绪</string>
     <string name="screen_capture_notification_text">点通知即可截图记账</string>
     <string name="screen_capture_notification_progress_text">正在识别截图</string>
     <string name="screen_capture_capture_action">截屏记账</string>
-    <string name="screen_capture_stop_action">停止会话</string>
     <string name="screen_capture_success_title">已自动记账</string>
     <string name="screen_capture_failure_title">截图记账失败</string>
+    <string name="screen_capture_error_generic">截图失败，请稍后重试</string>
+    <string name="screen_capture_error_prefix">截图失败：%1$s</string>
+    <string name="screen_capture_error_dismiss_notification">无法收起通知栏，请重试</string>
+    <string name="screen_capture_error_transition_timeout">页面恢复超时，已取消截图</string>
+    <string name="screen_capture_error_locked_or_secure">当前页面不允许截图，请解锁后重试</string>
+    <string name="screen_capture_error_invalid_display">当前无法获取屏幕画面，请解锁后重试</string>
+    <string name="screen_capture_error_accessibility_unavailable">无障碍服务未就绪，请稍后重试</string>
+    <string name="screen_capture_error_too_frequent">操作过快，请稍后再试</string>
+    <string name="screen_capture_error_invalid_window">当前窗口暂不支持截图，请稍后重试</string>
 </resources>
