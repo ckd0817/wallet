@@ -31,8 +31,10 @@ public class CaptureAnalysisClient {
         "如果 transactionType=expense，categoryId 必须且只能从这些支出分类中选择：{{expense_categories}}。\n" +
         "如果 transactionType=income，categoryId 必须且只能从这些收入分类中选择：{{income_categories}}。\n" +
         "只返回 JSON，不要输出 Markdown、解释或额外文本。返回格式固定为 {\"transactionType\":\"expense|income\",\"amount\":number,\"merchantName\":\"...\",\"occurredAt\":\"YYYY-MM-DD\",\"categoryId\":\"...\",\"note\":\"...\",\"summary\":\"...\"}。";
-    private static final String PROBE_IMAGE_BASE64 =
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO0+j9kAAAAASUVORK5CYII=";
+    private static final String CONNECTIVITY_TEST_SYSTEM_PROMPT =
+        "你是模型连通性测试助手。当前请求仅用于测试接口是否能正常返回内容。请直接回复一句简短中文，不要输出 JSON、Markdown 或解释。";
+    private static final String CONNECTIVITY_TEST_USER_PROMPT =
+        "这是一条模型连通性测试请求。请直接回复“连接成功”，或任意一句简短的确认文本。";
 
     public CaptureAnalysisOutcome analyze(byte[] pngBytes, JSONObject llmConfig, JSONArray categories) {
         if (
@@ -196,27 +198,11 @@ public class CaptureAnalysisClient {
             body.put(
                 "messages",
                 new JSONArray()
-                    .put(new JSONObject().put("role", "system").put("content", "你是模型连通性测试助手。只返回原始 JSON，不要输出 Markdown、解释或额外文本。"))
+                    .put(new JSONObject().put("role", "system").put("content", CONNECTIVITY_TEST_SYSTEM_PROMPT))
                     .put(
                         new JSONObject()
                             .put("role", "user")
-                            .put(
-                                "content",
-                                new JSONArray()
-                                    .put(
-                                        new JSONObject()
-                                            .put("type", "text")
-                                            .put("text", buildPrompt(categories, llmConfig))
-                                    )
-                                    .put(
-                                        new JSONObject()
-                                            .put("type", "image_url")
-                                            .put(
-                                                "image_url",
-                                                new JSONObject().put("url", "data:image/png;base64," + PROBE_IMAGE_BASE64)
-                                            )
-                                    )
-                            )
+                            .put("content", CONNECTIVITY_TEST_USER_PROMPT)
                     )
             );
 
@@ -240,23 +226,17 @@ public class CaptureAnalysisClient {
                 return result;
             }
 
-            String cleanedReply = assistantReply.replaceAll("```json\\s*|```", "").trim();
-            boolean ok = false;
-            String message = "模型已响应，但返回内容不符合预期";
-            try {
-                JSONObject parsedReply = new JSONObject(cleanedReply);
-                ok = parsedReply.optBoolean("ok", false);
-                message = parsedReply.optString("message", message);
-            } catch (Exception ignored) {
-                if (!assistantReply.trim().isEmpty()) {
-                    ok = true;
-                    message = "模型已返回内容，接口连通正常";
-                }
+            String trimmedAssistantReply = assistantReply == null ? "" : assistantReply.trim();
+            String trimmedResponseBody = responseBody == null ? "" : responseBody.trim();
+            if (!trimmedAssistantReply.isEmpty() || !trimmedResponseBody.isEmpty()) {
+                safePut(result, "ok", true);
+                safePut(result, "message", "模型测试成功：已收到模型响应");
+                safePut(result, "failureStage", "");
+                return result;
             }
 
-            safePut(result, "ok", ok);
-            safePut(result, "message", ok ? "模型测试成功: " + message : message);
-            safePut(result, "failureStage", ok ? "" : "response_shape");
+            safePut(result, "message", "模型接口已返回成功状态，但响应为空");
+            safePut(result, "failureStage", "empty_reply");
             return result;
         } catch (Exception exception) {
             String failureMessage = exception.getMessage() == null || exception.getMessage().trim().isEmpty()

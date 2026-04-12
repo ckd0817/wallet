@@ -68,6 +68,7 @@ const Settings: React.FC<SettingsProps> = ({
   const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
   const [modelTestResult, setModelTestResult] = useState<LLMConfigTestResult | null>(null);
   const [isAdvancedConfigOpen, setIsAdvancedConfigOpen] = useState(false);
+  const [isCaptureLogsOpen, setIsCaptureLogsOpen] = useState(false);
   const [isModelTestDetailsOpen, setIsModelTestDetailsOpen] = useState(false);
 
   const isAndroidNative = Capacitor.getPlatform() === 'android';
@@ -241,186 +242,326 @@ const Settings: React.FC<SettingsProps> = ({
         <SectionHeader title="截图自动记账" />
 
         <div className="rounded-[28px] border border-border bg-white p-5 shadow-sm sm:p-6">
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            {statusCards.map(({ icon: Icon, label, value }) => (
-              <StatusCard key={label} icon={Icon} label={label} value={value} />
-            ))}
-          </div>
-
-          {autoBookkeepingSettings.lastError && (
-            <div className="mt-4 rounded-2xl border border-amber-100 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-              最近错误：{autoBookkeepingSettings.lastError}
-            </div>
-          )}
-
-          <div className="mt-5 grid grid-cols-2 gap-3">
-            <PrimaryActionButton
-              onClick={handleOpenAccessibility}
-              disabled={isOpeningAccessibilitySettings || !isAndroidNative}
-              icon={Eye}
-              tone="primary"
-            >
-              {isOpeningAccessibilitySettings ? '打开中...' : '去开启无障碍'}
-            </PrimaryActionButton>
-            <PrimaryActionButton
-              onClick={handleRefreshStatus}
-              disabled={isRefreshingStatus || !isAndroidNative}
-              icon={RefreshCcw}
-              tone="ghost"
-            >
-              {isRefreshingStatus ? '刷新中...' : '刷新状态'}
-            </PrimaryActionButton>
-          </div>
-        </div>
-      </section>
-
-      <section>
-        <SectionHeader title="截图模型配置" />
-        <div className="rounded-[28px] border border-border bg-white p-5 shadow-sm sm:p-6">
-          <div className="flex flex-col gap-4">
-            <div className="grid gap-4">
-              <ConfigField label="Api Key">
-                <input
-                  type="password"
-                  value={llmConfig.apiKey}
-                  onChange={(event) => onUpdateLLMConfig({ ...llmConfig, apiKey: event.target.value })}
-                  placeholder="sk-..."
-                  className="w-full rounded-2xl border border-border bg-surface px-4 py-3 text-sm text-primary"
-                />
-              </ConfigField>
-
-              <div className="grid gap-4 sm:grid-cols-2">
-                <ConfigField label="Base URL">
-                  <input
-                    type="text"
-                    value={llmConfig.baseUrl}
-                    onChange={(event) => onUpdateLLMConfig({ ...llmConfig, baseUrl: event.target.value })}
-                    placeholder="https://api.openai.com/v1"
-                    className="w-full rounded-2xl border border-border bg-surface px-4 py-3 text-sm text-primary"
-                  />
-                </ConfigField>
-                <ConfigField label="Model Name">
-                  <input
-                    type="text"
-                    value={llmConfig.modelName}
-                    onChange={(event) => onUpdateLLMConfig({ ...llmConfig, modelName: event.target.value })}
-                    placeholder="填写支持图片输入的模型"
-                    className="w-full rounded-2xl border border-border bg-surface px-4 py-3 text-sm text-primary"
-                  />
-                </ConfigField>
+          <div className="space-y-6">
+            <div>
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                {statusCards.map(({ icon: Icon, label, value }) => (
+                  <StatusCard key={label} icon={Icon} label={label} value={value} />
+                ))}
               </div>
-            </div>
 
-            <div className="rounded-3xl border border-border bg-surface/40 p-4">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-semibold text-primary">模型连通性测试</span>
-                  {!llmConfigured && <InlineBadge tone="warning">未完成配置</InlineBadge>}
+              {autoBookkeepingSettings.lastError && (
+                <div className="mt-4 rounded-2xl border border-amber-100 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                  最近错误：{autoBookkeepingSettings.lastError}
                 </div>
-                <button
-                  onClick={handleTestModel}
-                  disabled={isTestingModel || !isAndroidNative || !llmConfigured}
-                  className="inline-flex min-w-[8rem] items-center justify-center gap-2 rounded-2xl bg-zinc-900 px-4 py-3 text-sm font-semibold text-white transition-colors disabled:cursor-not-allowed disabled:bg-zinc-200 disabled:text-zinc-400"
+              )}
+
+              <div className="mt-5 grid grid-cols-2 gap-3">
+                <PrimaryActionButton
+                  onClick={handleOpenAccessibility}
+                  disabled={isOpeningAccessibilitySettings || !isAndroidNative}
+                  icon={Eye}
+                  tone="primary"
                 >
-                  <Bot className="w-4 h-4" />
-                  {isTestingModel ? '测试中...' : '测试模型'}
-                </button>
+                  {isOpeningAccessibilitySettings ? '打开中...' : '去开启无障碍'}
+                </PrimaryActionButton>
+                <PrimaryActionButton
+                  onClick={handleRefreshStatus}
+                  disabled={isRefreshingStatus || !isAndroidNative}
+                  icon={RefreshCcw}
+                  tone="ghost"
+                >
+                  {isRefreshingStatus ? '刷新中...' : '刷新状态'}
+                </PrimaryActionButton>
+              </div>
+            </div>
+
+            <div className="border-t border-zinc-100 pt-6">
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-primary">模型配置</p>
+                </div>
+                {llmConfigured ? <InlineBadge tone="success">已配置</InlineBadge> : <InlineBadge tone="warning">未完成配置</InlineBadge>}
               </div>
 
-              {modelTestResult && (
-                <div className="mt-4 space-y-4">
-                  <div
-                    className={`rounded-2xl border px-4 py-3 text-sm font-medium ${
-                      modelTestResult.ok
-                        ? 'border-emerald-100 bg-emerald-50 text-emerald-800'
-                        : 'border-amber-100 bg-amber-50 text-amber-800'
-                    }`}
-                  >
-                    {modelTestResult.message}
+              <div className="flex flex-col gap-4">
+                <div className="grid gap-4">
+                  <ConfigField label="Api Key">
+                    <input
+                      type="password"
+                      value={llmConfig.apiKey}
+                      onChange={(event) => onUpdateLLMConfig({ ...llmConfig, apiKey: event.target.value })}
+                      placeholder="sk-..."
+                      className="w-full rounded-2xl border border-border bg-surface px-4 py-3 text-sm text-primary"
+                    />
+                  </ConfigField>
+
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <ConfigField label="Base URL">
+                      <input
+                        type="text"
+                        value={llmConfig.baseUrl}
+                        onChange={(event) => onUpdateLLMConfig({ ...llmConfig, baseUrl: event.target.value })}
+                        placeholder="https://api.openai.com/v1"
+                        className="w-full rounded-2xl border border-border bg-surface px-4 py-3 text-sm text-primary"
+                      />
+                    </ConfigField>
+                    <ConfigField label="Model Name">
+                      <input
+                        type="text"
+                        value={llmConfig.modelName}
+                        onChange={(event) => onUpdateLLMConfig({ ...llmConfig, modelName: event.target.value })}
+                        placeholder="填写支持图片输入的模型"
+                        className="w-full rounded-2xl border border-border bg-surface px-4 py-3 text-sm text-primary"
+                      />
+                    </ConfigField>
                   </div>
+                </div>
 
-                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                    <LogMeta label="测试结果" value={modelTestResult.ok ? '成功' : '失败'} />
-                    <LogMeta label="耗时" value={`${modelTestResult.elapsedMs} ms`} />
-                    <LogMeta label="HTTP 状态" value={String(modelTestResult.httpStatus || 0)} />
-                    <LogMeta label="失败阶段" value={modelTestResult.failureStage || '无'} />
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => setIsModelTestDetailsOpen((current) => !current)}
-                    className="inline-flex items-center gap-2 text-sm font-medium text-secondary transition-colors hover:text-primary"
-                  >
-                    {isModelTestDetailsOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                    查看响应详情
-                  </button>
-
-                  {isModelTestDetailsOpen && (
-                    <div className="space-y-3">
-                      <LogPanel title="模型原始回复" content={modelTestResult.assistantReplyRaw || '没有拿到模型回复。'} />
-                      <LogPanel title="HTTP 原始响应" content={modelTestResult.responseBodyRaw || '没有返回 HTTP 响应正文。'} />
+                <div className="rounded-3xl border border-border bg-surface/40 p-4">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-semibold text-primary">模型连通性测试</span>
+                      {!llmConfigured && <InlineBadge tone="warning">未完成配置</InlineBadge>}
                     </div>
+                    <button
+                      onClick={handleTestModel}
+                      disabled={isTestingModel || !isAndroidNative || !llmConfigured}
+                      className="inline-flex min-w-[8rem] items-center justify-center gap-2 rounded-2xl bg-zinc-900 px-4 py-3 text-sm font-semibold text-white transition-colors disabled:cursor-not-allowed disabled:bg-zinc-200 disabled:text-zinc-400"
+                    >
+                      <Bot className="w-4 h-4" />
+                      {isTestingModel ? '测试中...' : '测试模型'}
+                    </button>
+                  </div>
+
+                  {modelTestResult && (
+                    <div className="mt-4 space-y-4">
+                      <div
+                        className={`rounded-2xl border px-4 py-3 text-sm font-medium ${
+                          modelTestResult.ok
+                            ? 'border-emerald-100 bg-emerald-50 text-emerald-800'
+                            : 'border-amber-100 bg-amber-50 text-amber-800'
+                        }`}
+                      >
+                        {modelTestResult.message}
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                        <LogMeta label="测试结果" value={modelTestResult.ok ? '成功' : '失败'} />
+                        <LogMeta label="耗时" value={`${modelTestResult.elapsedMs} ms`} />
+                        <LogMeta label="HTTP 状态" value={String(modelTestResult.httpStatus || 0)} />
+                        <LogMeta label="失败阶段" value={modelTestResult.failureStage || '无'} />
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => setIsModelTestDetailsOpen((current) => !current)}
+                        className="inline-flex items-center gap-2 text-sm font-medium text-secondary transition-colors hover:text-primary"
+                      >
+                        {isModelTestDetailsOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                        查看响应详情
+                      </button>
+
+                      {isModelTestDetailsOpen && (
+                        <div className="space-y-3">
+                          <LogPanel title="模型原始回复" content={modelTestResult.assistantReplyRaw || '没有拿到模型回复。'} />
+                          <LogPanel title="HTTP 原始响应" content={modelTestResult.responseBodyRaw || '没有返回 HTTP 响应正文。'} />
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setIsAdvancedConfigOpen((current) => !current)}
+                  className="flex w-full items-center justify-between rounded-3xl border border-border bg-white px-4 py-4 text-left transition-colors hover:bg-surface/50"
+                >
+                  <div>
+                    <p className="text-sm font-semibold text-primary">高级配置</p>
+                    <p className="mt-1 text-xs text-secondary">Timeout · Prompt</p>
+                  </div>
+                  {isAdvancedConfigOpen ? (
+                    <ChevronUp className="w-4 h-4 text-zinc-400" />
+                  ) : (
+                    <ChevronDown className="w-4 h-4 text-zinc-400" />
+                  )}
+                </button>
+
+                {isAdvancedConfigOpen && (
+                  <div className="space-y-4 rounded-3xl border border-border bg-surface/30 p-4">
+                    <ConfigField label="Timeout (ms)">
+                      <input
+                        type="number"
+                        min={1000}
+                        step={1000}
+                        value={llmConfig.timeoutMs}
+                        onChange={(event) =>
+                          onUpdateLLMConfig({
+                            ...llmConfig,
+                            timeoutMs: Math.max(0, Number.parseInt(event.target.value || '0', 10) || 0),
+                          })
+                        }
+                        placeholder="20000"
+                        className="w-full rounded-2xl border border-border bg-white px-4 py-3 text-sm text-primary"
+                      />
+                    </ConfigField>
+
+                    <ConfigField label="截图分析提示词">
+                      <textarea
+                        value={llmConfig.capturePrompt}
+                        onChange={(event) => onUpdateLLMConfig({ ...llmConfig, capturePrompt: event.target.value })}
+                        rows={8}
+                        className="w-full rounded-2xl border border-border bg-white px-4 py-3 text-sm leading-6 text-primary"
+                      />
+                    </ConfigField>
+
+                    <div className="flex justify-end">
+                      <button
+                        type="button"
+                        onClick={() => onUpdateLLMConfig({ ...llmConfig, capturePrompt: DEFAULT_CAPTURE_PROMPT })}
+                        disabled={llmConfig.capturePrompt === DEFAULT_CAPTURE_PROMPT}
+                        className="inline-flex items-center justify-center rounded-2xl border border-border bg-white px-4 py-2.5 text-sm font-medium text-primary transition-colors disabled:cursor-not-allowed disabled:text-zinc-400"
+                      >
+                        恢复默认提示词
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="border-t border-zinc-100 pt-6">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsCaptureLogsOpen((current) => {
+                    if (current) {
+                      setExpandedLogId(null);
+                    }
+                    return !current;
+                  });
+                }}
+                className="flex w-full items-center justify-between gap-4 rounded-3xl border border-border bg-surface/40 px-4 py-4 text-left transition-colors hover:bg-surface/60"
+              >
+                <div className="min-w-0">
+                  <div className="flex items-center gap-3">
+                    <p className="text-sm font-semibold text-primary">分析日志</p>
+                    <span className="rounded-full bg-white px-2.5 py-1 text-[11px] font-medium text-zinc-500">
+                      {captureLogs.length > 0 ? `${captureLogs.length} 条` : '暂无'}
+                    </span>
+                  </div>
+                </div>
+                {isCaptureLogsOpen ? (
+                  <ChevronUp className="w-4 h-4 flex-shrink-0 text-zinc-400" />
+                ) : (
+                  <ChevronDown className="w-4 h-4 flex-shrink-0 text-zinc-400" />
+                )}
+              </button>
+
+              {isCaptureLogsOpen && (
+                <div className="mt-4 overflow-hidden rounded-[28px] border border-zinc-200 bg-zinc-50/70 shadow-sm divide-y divide-zinc-200">
+                  {captureLogs.length === 0 ? (
+                    <div className="p-6 text-center text-sm text-zinc-400">暂无分析日志</div>
+                  ) : (
+                    captureLogs.map((log) => {
+                      const relatedTransaction = log.transactionId ? transactionLookup.get(log.transactionId) : undefined;
+                      const relatedCategory = relatedTransaction
+                        ? categories.find((item) => item.id === relatedTransaction.categoryId)
+                        : undefined;
+                      const isExpanded = expandedLogId === log.id;
+                      const title =
+                        log.status === 'failed'
+                          ? log.failureReason || '截图识别失败'
+                          : log.merchantName || log.summary || '截图自动记账';
+                      const detailLine =
+                        log.status === 'failed'
+                          ? `${new Date(log.capturedAt).toLocaleString('zh-CN')} · 未入账`
+                          : `${new Date(log.capturedAt).toLocaleString('zh-CN')} · ${relatedCategory?.name || '已创建交易'}`;
+
+                      return (
+                        <div key={log.id} className="px-5 py-4">
+                          <button
+                            type="button"
+                            onClick={() => setExpandedLogId((current) => (current === log.id ? null : log.id))}
+                            className="w-full text-left"
+                          >
+                            <div className="space-y-1">
+                              <div className="flex items-start justify-between gap-4">
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <CaptureLogStatusBadge status={log.status} />
+                                    <span className="text-sm font-semibold text-primary break-words">{title}</span>
+                                  </div>
+                                </div>
+                                <div className="flex flex-shrink-0 items-center gap-3">
+                                  {typeof log.amount === 'number' && (
+                                    <span className="whitespace-nowrap text-sm font-semibold text-primary">¥{log.amount.toFixed(2)}</span>
+                                  )}
+                                  {isExpanded ? (
+                                    <ChevronUp className="w-4 h-4 text-zinc-400" />
+                                  ) : (
+                                    <ChevronDown className="w-4 h-4 text-zinc-400" />
+                                  )}
+                                </div>
+                              </div>
+                              <p className="text-xs text-secondary break-words">{detailLine}</p>
+                            </div>
+                          </button>
+
+                          {isExpanded && (
+                            <div className="mt-4 space-y-4 border-t border-zinc-200 pt-4">
+                              <div className="grid gap-3 sm:grid-cols-2">
+                                <LogMeta
+                                  label="状态"
+                                  value={log.status === 'success' ? '已创建交易' : log.status === 'failed' ? '未入账' : '处理中'}
+                                />
+                                <LogMeta label="时间" value={new Date(log.capturedAt).toLocaleString('zh-CN')} />
+                                {typeof log.httpStatus === 'number' && <LogMeta label="HTTP 状态" value={String(log.httpStatus)} />}
+                                {log.failureStage && <LogMeta label="失败阶段" value={log.failureStage} />}
+                              </div>
+
+                              {log.imagePath && (
+                                <div>
+                                  <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-secondary">截图</p>
+                                  <img
+                                    src={resolveImagePreview(log.imagePath)}
+                                    alt="截图分析日志"
+                                    className="max-h-[28rem] w-full rounded-2xl border border-border bg-white object-contain"
+                                  />
+                                </div>
+                              )}
+
+                              <LogPanel title="AI 原始回复" content={log.assistantReplyRaw || '没有拿到模型回复。'} />
+                              <LogPanel
+                                title="解析后的结构化结果"
+                                content={
+                                  log.assistantReplyParsed
+                                    ? JSON.stringify(log.assistantReplyParsed, null, 2)
+                                    : log.failureReason || '没有可解析的结构化结果。'
+                                }
+                              />
+                              <LogPanel title="HTTP 原始响应" content={log.responseBodyRaw || '没有返回 HTTP 响应正文。'} />
+
+                              {log.transactionId ? (
+                                <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-4 text-sm text-emerald-800">
+                                  已创建交易 {log.transactionId}
+                                  {relatedTransaction && `，金额 ¥${relatedTransaction.amount.toFixed(2)}`}
+                                </div>
+                              ) : (
+                                <div className="rounded-2xl border border-amber-100 bg-amber-50 p-4 text-sm text-amber-800">
+                                  本次截图未入账。{log.failureReason ? `失败原因：${log.failureReason}` : ''}
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })
                   )}
                 </div>
               )}
             </div>
-
-            <button
-              type="button"
-              onClick={() => setIsAdvancedConfigOpen((current) => !current)}
-              className="flex w-full items-center justify-between rounded-3xl border border-border bg-white px-4 py-4 text-left transition-colors hover:bg-surface/50"
-            >
-              <div>
-                <p className="text-sm font-semibold text-primary">高级配置</p>
-                <p className="mt-1 text-xs text-secondary">Timeout · Prompt</p>
-              </div>
-              {isAdvancedConfigOpen ? (
-                <ChevronUp className="w-4 h-4 text-zinc-400" />
-              ) : (
-                <ChevronDown className="w-4 h-4 text-zinc-400" />
-              )}
-            </button>
-
-            {isAdvancedConfigOpen && (
-              <div className="space-y-4 rounded-3xl border border-border bg-surface/30 p-4">
-                <ConfigField label="Timeout (ms)">
-                  <input
-                    type="number"
-                    min={1000}
-                    step={1000}
-                    value={llmConfig.timeoutMs}
-                    onChange={(event) =>
-                      onUpdateLLMConfig({
-                        ...llmConfig,
-                        timeoutMs: Math.max(0, Number.parseInt(event.target.value || '0', 10) || 0),
-                      })
-                    }
-                    placeholder="20000"
-                    className="w-full rounded-2xl border border-border bg-white px-4 py-3 text-sm text-primary"
-                  />
-                </ConfigField>
-
-                <ConfigField label="截图分析提示词">
-                  <textarea
-                    value={llmConfig.capturePrompt}
-                    onChange={(event) => onUpdateLLMConfig({ ...llmConfig, capturePrompt: event.target.value })}
-                    rows={8}
-                    className="w-full rounded-2xl border border-border bg-white px-4 py-3 text-sm leading-6 text-primary"
-                  />
-                </ConfigField>
-
-                <div className="flex justify-end">
-                  <button
-                    type="button"
-                    onClick={() => onUpdateLLMConfig({ ...llmConfig, capturePrompt: DEFAULT_CAPTURE_PROMPT })}
-                    disabled={llmConfig.capturePrompt === DEFAULT_CAPTURE_PROMPT}
-                    className="inline-flex items-center justify-center rounded-2xl border border-border bg-white px-4 py-2.5 text-sm font-medium text-primary transition-colors disabled:cursor-not-allowed disabled:text-zinc-400"
-                  >
-                    恢复默认提示词
-                  </button>
-                </div>
-              </div>
-            )}
           </div>
         </div>
       </section>
@@ -514,106 +655,6 @@ const Settings: React.FC<SettingsProps> = ({
               选择 JSON 文件
             </button>
           </div>
-        </div>
-      </section>
-
-      <section>
-        <SectionHeader title="截图分析日志" meta={captureLogs.length > 0 ? `${captureLogs.length} 条` : '暂无'} />
-        <div className="overflow-hidden rounded-[28px] border border-zinc-200 bg-zinc-50/70 shadow-sm divide-y divide-zinc-200">
-          {captureLogs.length === 0 ? (
-            <div className="p-6 text-center text-sm text-zinc-400">暂无分析日志</div>
-          ) : (
-            captureLogs.map((log) => {
-              const relatedTransaction = log.transactionId ? transactionLookup.get(log.transactionId) : undefined;
-              const relatedCategory = relatedTransaction
-                ? categories.find((item) => item.id === relatedTransaction.categoryId)
-                : undefined;
-              const isExpanded = expandedLogId === log.id;
-              const title =
-                log.status === 'failed'
-                  ? log.failureReason || '截图识别失败'
-                  : log.merchantName || log.summary || '截图自动记账';
-              const detailLine =
-                log.status === 'failed'
-                  ? `${new Date(log.capturedAt).toLocaleString('zh-CN')} · 未入账`
-                  : `${new Date(log.capturedAt).toLocaleString('zh-CN')} · ${relatedCategory?.name || '已创建交易'}`;
-
-              return (
-                <div key={log.id} className="px-5 py-4">
-                  <button
-                    type="button"
-                    onClick={() => setExpandedLogId((current) => (current === log.id ? null : log.id))}
-                    className="flex w-full items-start justify-between gap-4 text-left"
-                  >
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <CaptureLogStatusBadge status={log.status} />
-                        <span className="text-sm font-semibold text-primary break-words">{title}</span>
-                      </div>
-                      <p className="mt-1 text-xs text-secondary">{detailLine}</p>
-                    </div>
-                    <div className="flex flex-shrink-0 items-center gap-3">
-                      {typeof log.amount === 'number' && (
-                        <span className="whitespace-nowrap text-sm font-semibold text-primary">¥{log.amount.toFixed(2)}</span>
-                      )}
-                      {isExpanded ? (
-                        <ChevronUp className="w-4 h-4 text-zinc-400" />
-                      ) : (
-                        <ChevronDown className="w-4 h-4 text-zinc-400" />
-                      )}
-                    </div>
-                  </button>
-
-                  {isExpanded && (
-                    <div className="mt-4 space-y-4 border-t border-zinc-200 pt-4">
-                      <div className="grid gap-3 sm:grid-cols-2">
-                        <LogMeta
-                          label="状态"
-                          value={log.status === 'success' ? '已创建交易' : log.status === 'failed' ? '未入账' : '处理中'}
-                        />
-                        <LogMeta label="时间" value={new Date(log.capturedAt).toLocaleString('zh-CN')} />
-                        {typeof log.httpStatus === 'number' && <LogMeta label="HTTP 状态" value={String(log.httpStatus)} />}
-                        {log.failureStage && <LogMeta label="失败阶段" value={log.failureStage} />}
-                      </div>
-
-                      {log.imagePath && (
-                        <div>
-                          <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-secondary">截图</p>
-                          <img
-                            src={resolveImagePreview(log.imagePath)}
-                            alt="截图分析日志"
-                            className="max-h-[28rem] w-full rounded-2xl border border-border bg-white object-contain"
-                          />
-                        </div>
-                      )}
-
-                      <LogPanel title="AI 原始回复" content={log.assistantReplyRaw || '没有拿到模型回复。'} />
-                      <LogPanel
-                        title="解析后的结构化结果"
-                        content={
-                          log.assistantReplyParsed
-                            ? JSON.stringify(log.assistantReplyParsed, null, 2)
-                            : log.failureReason || '没有可解析的结构化结果。'
-                        }
-                      />
-                      <LogPanel title="HTTP 原始响应" content={log.responseBodyRaw || '没有返回 HTTP 响应正文。'} />
-
-                      {log.transactionId ? (
-                        <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-4 text-sm text-emerald-800">
-                          已创建交易 {log.transactionId}
-                          {relatedTransaction && `，金额 ¥${relatedTransaction.amount.toFixed(2)}`}
-                        </div>
-                      ) : (
-                        <div className="rounded-2xl border border-amber-100 bg-amber-50 p-4 text-sm text-amber-800">
-                          本次截图未入账。{log.failureReason ? `失败原因：${log.failureReason}` : ''}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              );
-            })
-          )}
         </div>
       </section>
 

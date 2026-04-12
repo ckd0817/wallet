@@ -98,10 +98,7 @@ const Analysis: React.FC<AnalysisProps> = ({ transactions, categories }) => {
       </div>
 
       <div className="bg-white border border-border p-6 rounded-2xl">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-base font-semibold text-primary">消费洞察</h3>
-          <span className="text-xs text-secondary">本地分析</span>
-        </div>
+        <h3 className="text-base font-semibold text-primary mb-4">消费洞察</h3>
         <div className="space-y-3">
           {analysis.habits.map((habit, index) => (
             <div
@@ -147,10 +144,7 @@ const Analysis: React.FC<AnalysisProps> = ({ transactions, categories }) => {
       </div>
 
       <div className="bg-white border border-border p-6 rounded-2xl">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-base font-semibold text-primary">理财建议</h3>
-          <span className="text-xs text-secondary">规则生成</span>
-        </div>
+        <h3 className="text-base font-semibold text-primary mb-4">理财建议</h3>
         <div className="space-y-3">
           {analysis.recommendations.map((recommendation, index) => (
             <div key={`${recommendation.priority}-${index}`} className="flex items-start gap-3 p-3 rounded-lg bg-surface">
