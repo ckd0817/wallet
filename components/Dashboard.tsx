@@ -150,9 +150,6 @@ const Dashboard: React.FC<DashboardProps> = ({ transactions, categories, onDelet
                                             <div className="min-w-0 flex flex-col gap-0.5">
                                                 <div className="flex items-center gap-2 flex-wrap">
                                                   <p className="text-base font-medium text-primary truncate">{category?.name}</p>
-                                                  {t.createdBy === 'screenshot_capture' && (
-                                                    <span className="text-[11px] px-2 py-0.5 rounded-full bg-zinc-100 text-zinc-500">截图</span>
-                                                  )}
                                                   {t.needsReview && (
                                                     <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">待复核</span>
                                                   )}

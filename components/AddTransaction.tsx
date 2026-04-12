@@ -210,12 +210,6 @@ const AddTransaction: React.FC<AddTransactionProps> = ({
                  </div>
                  {editData.createdBy === 'screenshot_capture' && (
                   <div className="w-full rounded-2xl bg-zinc-50 border border-border px-4 py-3 text-xs text-secondary mt-2">
-                    <div className="flex items-center gap-2 flex-wrap mb-2">
-                      <span className="px-2 py-0.5 rounded-full bg-zinc-100 text-zinc-500">截图记账</span>
-                      {editData.needsReview && (
-                        <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">待复核</span>
-                      )}
-                    </div>
                     {editData.merchantName && <p>商户：{editData.merchantName}</p>}
                     {editData.sourcePackage && <p className="mt-1">来源：{editData.sourcePackage}</p>}
                     {editData.captureSummary && <p className="mt-1 break-words">识别摘要：{editData.captureSummary}</p>}

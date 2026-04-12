@@ -223,6 +223,43 @@ const App: React.FC = () => {
     }
   }, []);
 
+  const openTransactionDetails = useCallback(
+    async (transaction: Transaction) => {
+      let transactionToOpen = transaction;
+
+      if (transaction.needsReview) {
+        const reviewedTransaction: Transaction = {
+          ...transaction,
+          needsReview: false,
+          updatedAt: new Date().toISOString(),
+        };
+
+        try {
+          if (runningInAndroid) {
+            const nextSnapshot = await saveNativeTransaction(reviewedTransaction);
+            applySnapshot(nextSnapshot);
+            transactionToOpen =
+              nextSnapshot.transactions.find((item) => item.id === reviewedTransaction.id) ?? reviewedTransaction;
+          } else {
+            const nextSnapshot = normalizeSnapshot({
+              ...buildCurrentSnapshot(),
+              transactions: transactions.map((item) => (item.id === reviewedTransaction.id ? reviewedTransaction : item)),
+            });
+            applySnapshot(nextSnapshot);
+            transactionToOpen =
+              nextSnapshot.transactions.find((item) => item.id === reviewedTransaction.id) ?? reviewedTransaction;
+          }
+        } catch (error) {
+          console.error('Failed to clear review state before opening transaction', error);
+        }
+      }
+
+      setEditingTransaction(transactionToOpen);
+      setIsAddModalOpen(true);
+    },
+    [applySnapshot, buildCurrentSnapshot, runningInAndroid, transactions],
+  );
+
   useEffect(() => {
     let isMounted = true;
     let captureHandle: { remove: () => Promise<void> } | null = null;
@@ -310,10 +347,9 @@ const App: React.FC = () => {
       return;
     }
 
-    setEditingTransaction(targetTransaction);
-    setIsAddModalOpen(true);
     setPendingEditTransactionId('');
-  }, [pendingEditTransactionId, transactions]);
+    void openTransactionDetails(targetTransaction);
+  }, [openTransactionDetails, pendingEditTransactionId, transactions]);
 
   useEffect(() => {
     if (!isInitialized || isHydratingRef.current || runningInAndroid) {
@@ -364,8 +400,7 @@ const App: React.FC = () => {
   };
 
   const handleEditRequest = (transaction: Transaction) => {
-    setEditingTransaction(transaction);
-    setIsAddModalOpen(true);
+    void openTransactionDetails(transaction);
   };
 
   const handleCloseAddModal = () => {
