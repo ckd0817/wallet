@@ -7,6 +7,22 @@ final class NotificationTextFormatter {
 
     private NotificationTextFormatter() {}
 
+    static String buildProcessingTitle() {
+        return "截图已完成";
+    }
+
+    static String buildProcessingText() {
+        return "正在识别";
+    }
+
+    static String buildSuccessTitle() {
+        return "识别完成";
+    }
+
+    static String buildFailureTitle() {
+        return "识别失败";
+    }
+
     static String buildCaptureResultLine(JSONObject transaction) {
         String merchantLabel = transaction.optString("merchantName", "").trim();
         if (merchantLabel.isEmpty()) {

@@ -28,6 +28,7 @@ public class CaptureAnalysisClient {
         "付款成功、消费支出、扣款成功等记为 expense。\n" +
         "收款到账、退款到账、报销到账等记为 income。\n" +
         "如果截图不足以确认是一笔有效入账记录，或者无法确认金额，就仍然只返回 JSON，并将 amount 设为 0，categoryId 设为空字符串，summary 写明原因。\n" +
+        "如果截图里同时出现多笔支出记录，优先记录最新的一条，不要同时输出两条或多条记录。\n" +
         "如果 transactionType=expense，categoryId 必须且只能从这些支出分类中选择：{{expense_categories}}。\n" +
         "如果 transactionType=income，categoryId 必须且只能从这些收入分类中选择：{{income_categories}}。\n" +
         "只返回 JSON，不要输出 Markdown、解释或额外文本。返回格式固定为 {\"transactionType\":\"expense|income\",\"amount\":number,\"merchantName\":\"...\",\"occurredAt\":\"YYYY-MM-DD\",\"categoryId\":\"...\",\"note\":\"...\",\"summary\":\"...\"}。";

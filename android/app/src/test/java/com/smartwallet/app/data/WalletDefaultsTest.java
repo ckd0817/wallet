@@ -10,6 +10,17 @@ import org.junit.Test;
 
 public class WalletDefaultsTest {
 
+    private static final String PREVIOUS_DEFAULT_CAPTURE_PROMPT =
+        "你正在分析一张付款、收款或退款结果截图。\n" +
+        "今天的本地日期是 {{today_date}}。在推断 occurredAt 时优先使用这个日期；只有截图里明确出现其他日期时，才使用截图中的日期。\n" +
+        "你只能识别两种交易类型：expense 或 income。\n" +
+        "付款成功、消费支出、扣款成功等记为 expense。\n" +
+        "收款到账、退款到账、报销到账等记为 income。\n" +
+        "如果截图不足以确认是一笔有效入账记录，或者无法确认金额，就仍然只返回 JSON，并将 amount 设为 0，categoryId 设为空字符串，summary 写明原因。\n" +
+        "如果 transactionType=expense，categoryId 必须且只能从这些支出分类中选择：{{expense_categories}}。\n" +
+        "如果 transactionType=income，categoryId 必须且只能从这些收入分类中选择：{{income_categories}}。\n" +
+        "只返回 JSON，不要输出 Markdown、解释或额外文本。返回格式固定为 {\"transactionType\":\"expense|income\",\"amount\":number,\"merchantName\":\"...\",\"occurredAt\":\"YYYY-MM-DD\",\"categoryId\":\"...\",\"note\":\"...\",\"summary\":\"...\"}。";
+
     @Test
     public void defaultStoreIncludesScreenshotBookkeepingState() {
         JSONObject store = WalletDefaults.defaultStore();
@@ -58,6 +69,22 @@ public class WalletDefaultsTest {
         assertTrue(mergedLlmConfig != null);
         assertFalse(mergedLlmConfig.has("enabled"));
         assertEquals("test-key", mergedLlmConfig.optString("apiKey"));
+    }
+
+    @Test
+    public void ensureDefaultsUpgradesPreviousDefaultCapturePrompt() throws Exception {
+        JSONObject candidate = new JSONObject();
+        JSONObject llmConfig = new JSONObject();
+        llmConfig.put("capturePrompt", PREVIOUS_DEFAULT_CAPTURE_PROMPT);
+        candidate.put("llmConfig", llmConfig);
+
+        JSONObject merged = WalletDefaults.ensureDefaults(candidate);
+        JSONObject mergedLlmConfig = merged.optJSONObject("llmConfig");
+        String currentDefaultPrompt = WalletDefaults.defaultLlmConfig().optString("capturePrompt");
+
+        assertTrue(mergedLlmConfig != null);
+        assertEquals(currentDefaultPrompt, mergedLlmConfig.optString("capturePrompt"));
+        assertTrue(currentDefaultPrompt.contains("如果截图里同时出现多笔支出记录，优先记录最新的一条，不要同时输出两条或多条记录。"));
     }
 
     private static JSONObject category(String id, String name) throws Exception {

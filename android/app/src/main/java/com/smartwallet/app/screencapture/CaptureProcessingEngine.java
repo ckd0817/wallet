@@ -35,6 +35,7 @@ public final class CaptureProcessingEngine {
             captureLog = createPendingCaptureLog(saveCaptureImage(pngBytes));
             repository().upsertCaptureLog(captureLog);
             emitStatus();
+            NotificationHelper.showCaptureProcessing(appContext);
 
             CaptureAnalysisOutcome outcome = analysisClient.analyze(pngBytes, repository().getLlmConfig(), repository().getCategories());
             if (!outcome.isSupported()) {

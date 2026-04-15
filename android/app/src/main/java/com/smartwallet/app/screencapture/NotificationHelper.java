@@ -23,7 +23,9 @@ import org.json.JSONObject;
 public final class NotificationHelper {
 
     public static final String CHANNEL_ID = "screen_capture_bookkeeping";
+    public static final String ALERT_CHANNEL_ID = "screen_capture_bookkeeping_alerts";
     public static final int READY_NOTIFICATION_ID = 31001;
+    public static final int PROCESSING_NOTIFICATION_ID = 31002;
 
     private NotificationHelper() {}
 
@@ -45,6 +47,15 @@ public final class NotificationHelper {
         channel.setDescription(context.getString(R.string.screen_capture_channel_description));
         channel.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
         notificationManager.createNotificationChannel(channel);
+
+        NotificationChannel alertChannel = new NotificationChannel(
+            ALERT_CHANNEL_ID,
+            context.getString(R.string.screen_capture_alert_channel_name),
+            NotificationManager.IMPORTANCE_HIGH
+        );
+        alertChannel.setDescription(context.getString(R.string.screen_capture_alert_channel_description));
+        alertChannel.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
+        notificationManager.createNotificationChannel(alertChannel);
     }
 
     public static boolean isNotificationPermissionGranted(Context context) {
@@ -114,12 +125,43 @@ public final class NotificationHelper {
             .setOnlyAlertOnce(true)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
-            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
             .addAction(android.R.drawable.ic_menu_camera, context.getString(R.string.screen_capture_capture_action), captureIntent)
             .build();
     }
 
+    public static void showCaptureProcessing(Context context) {
+        if (!isNotificationPermissionGranted(context)) {
+            return;
+        }
+
+        Notification notification = new NotificationCompat.Builder(context, ALERT_CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_popup_sync)
+            .setContentTitle(NotificationTextFormatter.buildProcessingTitle())
+            .setContentText(NotificationTextFormatter.buildProcessingText())
+            .setStyle(new NotificationCompat.BigTextStyle().bigText(NotificationTextFormatter.buildProcessingText()))
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setTimeoutAfter(60000L)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setCategory(NotificationCompat.CATEGORY_STATUS)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setPublicVersion(buildPublicAlertNotification(
+                context,
+                NotificationTextFormatter.buildProcessingTitle(),
+                NotificationTextFormatter.buildProcessingText()
+            ))
+            .build();
+
+        NotificationManagerCompat.from(context).notify(PROCESSING_NOTIFICATION_ID, notification);
+    }
+
+    public static void cancelCaptureProcessing(Context context) {
+        NotificationManagerCompat.from(context).cancel(PROCESSING_NOTIFICATION_ID);
+    }
+
     public static void showCaptureResult(Context context, JSONObject transaction) {
+        cancelCaptureProcessing(context);
         if (!isNotificationPermissionGranted(context)) {
             return;
         }
@@ -134,15 +176,16 @@ public final class NotificationHelper {
         String resultLine = NotificationTextFormatter.buildCaptureResultLine(transaction);
         String resultSummary = NotificationTextFormatter.buildCaptureResultSummary(transaction);
 
-        Notification notification = new NotificationCompat.Builder(context, CHANNEL_ID)
+        Notification notification = new NotificationCompat.Builder(context, ALERT_CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_menu_save)
-            .setContentTitle(context.getString(R.string.screen_capture_success_title))
+            .setContentTitle(NotificationTextFormatter.buildSuccessTitle())
             .setContentText(resultLine)
             .setStyle(new NotificationCompat.BigTextStyle().bigText(resultSummary))
             .setAutoCancel(true)
             .setContentIntent(editIntent)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setCategory(NotificationCompat.CATEGORY_STATUS)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setPublicVersion(buildPublicCaptureResultNotification(context, resultLine, resultSummary))
             .build();
 
@@ -150,35 +193,45 @@ public final class NotificationHelper {
     }
 
     public static void showCaptureFailure(Context context, String message) {
+        cancelCaptureProcessing(context);
         if (!isNotificationPermissionGranted(context)) {
             return;
         }
         String failureText = NotificationTextFormatter.buildFailureText(message);
 
-        Notification notification = new NotificationCompat.Builder(context, CHANNEL_ID)
+        Notification notification = new NotificationCompat.Builder(context, ALERT_CHANNEL_ID)
             .setSmallIcon(android.R.drawable.stat_notify_error)
-            .setContentTitle(context.getString(R.string.screen_capture_failure_title))
+            .setContentTitle(NotificationTextFormatter.buildFailureTitle())
             .setContentText(failureText)
             .setAutoCancel(true)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
             .setCategory(NotificationCompat.CATEGORY_ERROR)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setPublicVersion(
-                new NotificationCompat.Builder(context, CHANNEL_ID)
-                    .setSmallIcon(android.R.drawable.stat_notify_error)
-                    .setContentTitle(context.getString(R.string.screen_capture_failure_title))
-                    .setContentText(failureText)
-                    .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
-                    .build()
+                buildPublicAlertNotification(
+                    context,
+                    NotificationTextFormatter.buildFailureTitle(),
+                    failureText
+                )
             )
             .build();
 
         NotificationManagerCompat.from(context).notify((int) (System.currentTimeMillis() % Integer.MAX_VALUE), notification);
     }
 
+    private static Notification buildPublicAlertNotification(Context context, String title, String text) {
+        return new NotificationCompat.Builder(context, ALERT_CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .build();
+    }
+
     private static Notification buildPublicCaptureResultNotification(Context context, String resultLine, String resultSummary) {
-        return new NotificationCompat.Builder(context, CHANNEL_ID)
+        return new NotificationCompat.Builder(context, ALERT_CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_menu_save)
-            .setContentTitle(context.getString(R.string.screen_capture_success_title))
+            .setContentTitle(NotificationTextFormatter.buildSuccessTitle())
             .setContentText(resultLine)
             .setStyle(new NotificationCompat.BigTextStyle().bigText(resultSummary))
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
