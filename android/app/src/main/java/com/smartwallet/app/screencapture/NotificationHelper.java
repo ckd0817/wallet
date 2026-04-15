@@ -5,6 +5,7 @@ import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
+import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
@@ -102,6 +103,23 @@ public final class NotificationHelper {
 
     public static void cancelReadyNotification(Context context) {
         NotificationManagerCompat.from(context).cancel(READY_NOTIFICATION_ID);
+    }
+
+    public static void startForegroundNotification(Service service, boolean captureInProgress) {
+        if (!isNotificationPermissionGranted(service)) {
+            Notification notification = buildReadyNotification(service, captureInProgress);
+            service.startForeground(READY_NOTIFICATION_ID, notification);
+            return;
+        }
+        Notification notification = buildReadyNotification(service, captureInProgress);
+        service.startForeground(READY_NOTIFICATION_ID, notification);
+    }
+
+    public static void updateForegroundNotification(Service service, boolean captureInProgress) {
+        if (!isNotificationPermissionGranted(service)) {
+            return;
+        }
+        NotificationManagerCompat.from(service).notify(READY_NOTIFICATION_ID, buildReadyNotification(service, captureInProgress));
     }
 
     public static Notification buildReadyNotification(Context context, boolean captureInProgress) {

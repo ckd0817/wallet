@@ -94,7 +94,10 @@ public class AccessibilityCaptureService extends AccessibilityService {
         }
 
         Context appContext = context.getApplicationContext();
-        if (isConnected() && isEnabledInSystem(appContext) && NotificationHelper.isNotificationPermissionGranted(appContext)) {
+        AccessibilityCaptureService service = getActiveService();
+        if (service != null && isConnected() && isEnabledInSystem(appContext)) {
+            NotificationHelper.updateForegroundNotification(service, false);
+        } else if (isConnected() && isEnabledInSystem(appContext) && NotificationHelper.isNotificationPermissionGranted(appContext)) {
             NotificationHelper.showReadyNotification(appContext, false);
         } else {
             NotificationHelper.cancelReadyNotification(appContext);
@@ -113,9 +116,9 @@ public class AccessibilityCaptureService extends AccessibilityService {
         super.onServiceConnected();
         ACTIVE_INSTANCE.set(new WeakReference<>(this));
         NotificationHelper.ensureChannels(this);
-        syncReadyNotification(this);
+        NotificationHelper.startForegroundNotification(this, false);
         persistCapabilityStatus(null);
-        Log.i(TAG, "Accessibility capture service connected");
+        Log.i(TAG, "Accessibility capture service connected as foreground");
     }
 
     @Override
@@ -135,6 +138,7 @@ public class AccessibilityCaptureService extends AccessibilityService {
     @Override
     public void onDestroy() {
         clearActiveService();
+        stopForeground(STOP_FOREGROUND_REMOVE);
         NotificationHelper.cancelReadyNotification(this);
         if (captureExecutor != null) {
             captureExecutor.shutdownNow();
@@ -155,7 +159,7 @@ public class AccessibilityCaptureService extends AccessibilityService {
             return;
         }
 
-        NotificationHelper.showReadyNotification(this, true);
+        NotificationHelper.updateForegroundNotification(this, true);
 
         Log.i(TAG, "Accessibility screenshot requested; dismissing notification shade first");
         boolean dismissed = performGlobalAction(GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE);

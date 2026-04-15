@@ -1,5 +1,6 @@
-import React, { useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Battery,
   Bell,
   Bot,
   Camera,
@@ -29,7 +30,7 @@ import {
   WalletBackupData,
 } from '../types';
 import { buildBackupPayload, parseBackupFile } from '../services/dataBackup';
-import { DEFAULT_CAPTURE_PROMPT } from '../services/walletStore';
+import { DEFAULT_CAPTURE_PROMPT, isNativeIgnoringBatteryOptimizations, requestNativeIgnoreBatteryOptimization } from '../services/walletStore';
 import { getRetryableCaptureLogIds } from './captureLogRetry';
 
 interface SettingsProps {
@@ -74,6 +75,8 @@ const Settings: React.FC<SettingsProps> = ({
   const [isCaptureLogsOpen, setIsCaptureLogsOpen] = useState(false);
   const [isModelTestDetailsOpen, setIsModelTestDetailsOpen] = useState(false);
   const [retryingLogIds, setRetryingLogIds] = useState<Record<string, boolean>>({});
+  const [batteryOptimizationStatus, setBatteryOptimizationStatus] = useState<'checking' | 'ignored' | 'not_ignored'>('checking');
+  const [isRequestingBatteryOptimization, setIsRequestingBatteryOptimization] = useState(false);
 
   const isAndroidNative = Capacitor.getPlatform() === 'android';
   const llmConfigured = Boolean(llmConfig.apiKey && llmConfig.baseUrl && llmConfig.modelName);
@@ -119,11 +122,38 @@ const Settings: React.FC<SettingsProps> = ({
   );
   const retryableLogIds = useMemo(() => getRetryableCaptureLogIds(captureLogs), [captureLogs]);
 
+  useEffect(() => {
+    checkBatteryOptimization();
+  }, []);
+
   const resolveImagePreview = (imagePath: string) => {
     if (!imagePath) {
       return '';
     }
     return imagePath.startsWith('file://') ? Capacitor.convertFileSrc(imagePath) : imagePath;
+  };
+
+  const checkBatteryOptimization = async () => {
+    if (!isAndroidNative) {
+      setBatteryOptimizationStatus('ignored');
+      return;
+    }
+    try {
+      const ignoring = await isNativeIgnoringBatteryOptimizations();
+      setBatteryOptimizationStatus(ignoring ? 'ignored' : 'not_ignored');
+    } catch {
+      setBatteryOptimizationStatus('not_ignored');
+    }
+  };
+
+  const handleRequestBatteryOptimization = async () => {
+    setIsRequestingBatteryOptimization(true);
+    try {
+      const ignoring = await requestNativeIgnoreBatteryOptimization();
+      setBatteryOptimizationStatus(ignoring ? 'ignored' : 'not_ignored');
+    } finally {
+      setIsRequestingBatteryOptimization(false);
+    }
   };
 
   const handleExport = async () => {
@@ -300,6 +330,25 @@ const Settings: React.FC<SettingsProps> = ({
                   {isRefreshingStatus ? '刷新中...' : '刷新状态'}
                 </PrimaryActionButton>
               </div>
+
+              {isAndroidNative && autoBookkeepingSettings.accessibilityEnabled && batteryOptimizationStatus !== 'ignored' && (
+                <div className="mt-4 rounded-2xl border border-amber-100 bg-amber-50 p-4">
+                  <div className="flex items-start gap-3">
+                    <Battery className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-amber-800">关闭电池优化</p>
+                      <p className="mt-1 text-xs text-amber-700">系统可能因省电策略杀掉后台服务，建议关闭电池优化以保持截图记账稳定运行</p>
+                      <button
+                        onClick={handleRequestBatteryOptimization}
+                        disabled={isRequestingBatteryOptimization}
+                        className="mt-3 inline-flex items-center justify-center gap-2 rounded-2xl bg-amber-600 px-4 py-2.5 text-xs font-semibold text-white transition-colors hover:bg-amber-700 disabled:cursor-not-allowed disabled:bg-amber-300"
+                      >
+                        {isRequestingBatteryOptimization ? '请求中...' : '去关闭电池优化'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="border-t border-zinc-100 pt-6">

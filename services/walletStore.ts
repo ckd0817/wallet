@@ -41,6 +41,8 @@ interface ScreenCaptureBookkeepingPlugin {
   retryCaptureLog(options: { logId: string }): Promise<AutoBookkeepingSettings>;
   testModelConfig(): Promise<LLMConfigTestResult>;
   consumePendingDeepLink(): Promise<{ url?: string }>;
+  isIgnoringBatteryOptimizations(): Promise<{ ignoring: boolean }>;
+  requestIgnoreBatteryOptimization(): Promise<{ ignoring?: boolean }>;
   addListener(
     eventName: 'captureRecorded' | 'statusChanged' | 'deepLinkReceived',
     listenerFunc: (payload: { transaction?: Transaction; status?: AutoBookkeepingSettings; url?: string }) => void,
@@ -328,6 +330,24 @@ export const consumePendingNativeDeepLink = async () => {
 
   const { url } = await ScreenCaptureBookkeeping.consumePendingDeepLink();
   return url ?? '';
+};
+
+export const isNativeIgnoringBatteryOptimizations = async (): Promise<boolean> => {
+  if (!isAndroidNative()) {
+    return true;
+  }
+
+  const { ignoring } = await ScreenCaptureBookkeeping.isIgnoringBatteryOptimizations();
+  return ignoring;
+};
+
+export const requestNativeIgnoreBatteryOptimization = async (): Promise<boolean> => {
+  if (!isAndroidNative()) {
+    return true;
+  }
+
+  await ScreenCaptureBookkeeping.requestIgnoreBatteryOptimization();
+  return isNativeIgnoringBatteryOptimizations();
 };
 
 export const addNativeCaptureListener = async (

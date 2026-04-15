@@ -1,8 +1,10 @@
 package com.smartwallet.app;
 
 import android.Manifest;
+import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
+import android.os.PowerManager;
 import android.provider.Settings;
 import android.util.Log;
 import androidx.annotation.Nullable;
@@ -129,6 +131,33 @@ public class ScreenCaptureBookkeepingPlugin extends Plugin {
         JSObject response = new JSObject();
         response.put("url", current);
         call.resolve(response);
+    }
+
+    @PluginMethod
+    public void isIgnoringBatteryOptimizations(PluginCall call) {
+        PowerManager powerManager = (PowerManager) getContext().getSystemService(Context.POWER_SERVICE);
+        boolean ignoring = powerManager != null && powerManager.isIgnoringBatteryOptimizations(getContext().getPackageName());
+        JSObject response = new JSObject();
+        response.put("ignoring", ignoring);
+        call.resolve(response);
+    }
+
+    @PluginMethod
+    public void requestIgnoreBatteryOptimization(PluginCall call) {
+        PowerManager powerManager = (PowerManager) getContext().getSystemService(Context.POWER_SERVICE);
+        boolean alreadyIgnoring = powerManager != null && powerManager.isIgnoringBatteryOptimizations(getContext().getPackageName());
+        if (alreadyIgnoring) {
+            JSObject response = new JSObject();
+            response.put("ignoring", true);
+            call.resolve(response);
+            return;
+        }
+
+        Intent intent = new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS);
+        intent.setData(Uri.parse("package:" + getContext().getPackageName()));
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        getContext().startActivity(intent);
+        call.resolve();
     }
 
     public static void handleIncomingIntent(@Nullable Intent intent) {
