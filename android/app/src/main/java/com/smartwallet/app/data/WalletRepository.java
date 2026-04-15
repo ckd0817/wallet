@@ -183,6 +183,24 @@ public class WalletRepository {
         }
     }
 
+    public JSONObject getCaptureLogById(String id) {
+        synchronized (lock) {
+            JSONArray captureLogs = readStoreLocked().optJSONArray("captureLogs");
+            if (captureLogs == null) {
+                return new JSONObject();
+            }
+
+            for (int index = 0; index < captureLogs.length(); index++) {
+                JSONObject captureLog = captureLogs.optJSONObject(index);
+                if (captureLog != null && id.equals(captureLog.optString("id", ""))) {
+                    return cloneObject(captureLog);
+                }
+            }
+
+            return new JSONObject();
+        }
+    }
+
     private JSONObject normalizeTransaction(JSONObject transaction) {
         JSONObject normalized = cloneObject(transaction);
         String now = nowIsoString();

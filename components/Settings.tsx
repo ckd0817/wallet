@@ -30,6 +30,7 @@ import {
 } from '../types';
 import { buildBackupPayload, parseBackupFile } from '../services/dataBackup';
 import { DEFAULT_CAPTURE_PROMPT } from '../services/walletStore';
+import { getRetryableCaptureLogIds } from './captureLogRetry';
 
 interface SettingsProps {
   transactions: Transaction[];
@@ -44,6 +45,7 @@ interface SettingsProps {
   onOpenAccessibilitySettings: () => Promise<void> | void;
   onTestModelConfig: () => Promise<LLMConfigTestResult> | LLMConfigTestResult;
   onRefreshAutoBookkeepingStatus: () => Promise<void> | void;
+  onRetryCaptureLog: (logId: string) => Promise<void> | void;
 }
 
 const Settings: React.FC<SettingsProps> = ({
@@ -59,6 +61,7 @@ const Settings: React.FC<SettingsProps> = ({
   onOpenAccessibilitySettings,
   onTestModelConfig,
   onRefreshAutoBookkeepingStatus,
+  onRetryCaptureLog,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [importMode, setImportMode] = useState<'append' | 'overwrite'>('append');
@@ -70,6 +73,7 @@ const Settings: React.FC<SettingsProps> = ({
   const [isAdvancedConfigOpen, setIsAdvancedConfigOpen] = useState(false);
   const [isCaptureLogsOpen, setIsCaptureLogsOpen] = useState(false);
   const [isModelTestDetailsOpen, setIsModelTestDetailsOpen] = useState(false);
+  const [retryingLogIds, setRetryingLogIds] = useState<Record<string, boolean>>({});
 
   const isAndroidNative = Capacitor.getPlatform() === 'android';
   const llmConfigured = Boolean(llmConfig.apiKey && llmConfig.baseUrl && llmConfig.modelName);
@@ -113,6 +117,7 @@ const Settings: React.FC<SettingsProps> = ({
     () => new Map(transactions.map((transaction) => [transaction.id, transaction])),
     [transactions],
   );
+  const retryableLogIds = useMemo(() => getRetryableCaptureLogIds(captureLogs), [captureLogs]);
 
   const resolveImagePreview = (imagePath: string) => {
     if (!imagePath) {
@@ -233,6 +238,27 @@ const Settings: React.FC<SettingsProps> = ({
       });
     } finally {
       setIsTestingModel(false);
+    }
+  };
+
+  const handleRetryCaptureLog = async (logId: string) => {
+    if (retryingLogIds[logId]) {
+      return;
+    }
+
+    setRetryingLogIds((current) => ({
+      ...current,
+      [logId]: true,
+    }));
+
+    try {
+      await onRetryCaptureLog(logId);
+    } finally {
+      setRetryingLogIds((current) => {
+        const nextState = { ...current };
+        delete nextState[logId];
+        return nextState;
+      });
     }
   };
 
@@ -470,6 +496,7 @@ const Settings: React.FC<SettingsProps> = ({
                         ? categories.find((item) => item.id === relatedTransaction.categoryId)
                         : undefined;
                       const isExpanded = expandedLogId === log.id;
+                      const showRetryButton = isAndroidNative && retryableLogIds.has(log.id);
                       const title =
                         log.status === 'failed'
                           ? log.failureReason || '截图识别失败'
@@ -481,33 +508,52 @@ const Settings: React.FC<SettingsProps> = ({
 
                       return (
                         <div key={log.id} className="px-5 py-4">
-                          <button
-                            type="button"
-                            onClick={() => setExpandedLogId((current) => (current === log.id ? null : log.id))}
-                            className="w-full text-left"
-                          >
-                            <div className="space-y-1">
-                              <div className="flex items-start justify-between gap-4">
-                                <div className="min-w-0 flex-1">
-                                  <div className="flex items-center gap-2 flex-wrap">
-                                    <CaptureLogStatusBadge status={log.status} />
-                                    <span className="text-sm font-semibold text-primary break-words">{title}</span>
+                          <div className="flex items-start gap-3">
+                            <button
+                              type="button"
+                              onClick={() => setExpandedLogId((current) => (current === log.id ? null : log.id))}
+                              className="min-w-0 flex-1 text-left"
+                            >
+                              <div className="space-y-1">
+                                <div className="flex items-start justify-between gap-4">
+                                  <div className="min-w-0 flex-1">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <CaptureLogStatusBadge status={log.status} />
+                                      <span className="text-sm font-semibold text-primary break-words">{title}</span>
+                                    </div>
                                   </div>
-                                </div>
-                                <div className="flex flex-shrink-0 items-center gap-3">
                                   {typeof log.amount === 'number' && (
                                     <span className="whitespace-nowrap text-sm font-semibold text-primary">¥{log.amount.toFixed(2)}</span>
                                   )}
-                                  {isExpanded ? (
-                                    <ChevronUp className="w-4 h-4 text-zinc-400" />
-                                  ) : (
-                                    <ChevronDown className="w-4 h-4 text-zinc-400" />
-                                  )}
                                 </div>
+                                <p className="text-xs text-secondary break-words">{detailLine}</p>
                               </div>
-                              <p className="text-xs text-secondary break-words">{detailLine}</p>
+                            </button>
+                            <div className="flex flex-shrink-0 items-center gap-2">
+                              {showRetryButton && (
+                                <button
+                                  type="button"
+                                  onClick={() => void handleRetryCaptureLog(log.id)}
+                                  disabled={retryingLogIds[log.id]}
+                                  className="inline-flex items-center justify-center rounded-xl border border-border bg-white px-3 py-2 text-xs font-semibold text-primary transition-colors hover:bg-surface disabled:cursor-not-allowed disabled:text-zinc-400"
+                                >
+                                  {retryingLogIds[log.id] ? '重试中' : '重试'}
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => setExpandedLogId((current) => (current === log.id ? null : log.id))}
+                                className="inline-flex h-9 w-9 items-center justify-center rounded-xl text-zinc-400 transition-colors hover:bg-white hover:text-primary"
+                                aria-label={isExpanded ? '收起日志详情' : '展开日志详情'}
+                              >
+                                {isExpanded ? (
+                                  <ChevronUp className="w-4 h-4" />
+                                ) : (
+                                  <ChevronDown className="w-4 h-4" />
+                                )}
+                              </button>
                             </div>
-                          </button>
+                          </div>
 
                           {isExpanded && (
                             <div className="mt-4 space-y-4 border-t border-zinc-200 pt-4">

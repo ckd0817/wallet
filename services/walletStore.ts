@@ -38,6 +38,7 @@ interface ScreenCaptureBookkeepingPlugin {
   getStatus(): Promise<AutoBookkeepingSettings>;
   openAccessibilitySettings(): Promise<AutoBookkeepingSettings>;
   captureNow(): Promise<AutoBookkeepingSettings>;
+  retryCaptureLog(options: { logId: string }): Promise<AutoBookkeepingSettings>;
   testModelConfig(): Promise<LLMConfigTestResult>;
   consumePendingDeepLink(): Promise<{ url?: string }>;
   addListener(
@@ -276,6 +277,17 @@ export const captureNativeNow = async () => {
   return {
     ...defaultAutoBookkeepingSettings(),
     ...(await ScreenCaptureBookkeeping.captureNow()),
+  };
+};
+
+export const retryNativeCaptureLog = async (logId: string) => {
+  if (!isAndroidNative()) {
+    return defaultAutoBookkeepingSettings();
+  }
+
+  return {
+    ...defaultAutoBookkeepingSettings(),
+    ...(await ScreenCaptureBookkeeping.retryCaptureLog({ logId })),
   };
 };
 

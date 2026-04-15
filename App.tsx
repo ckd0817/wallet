@@ -43,6 +43,7 @@ import {
   saveNativeTransaction,
   saveWebSnapshot,
   testNativeModelConfig,
+  retryNativeCaptureLog,
 } from './services/walletStore';
 import { mergeBackupData } from './services/dataBackup';
 
@@ -543,6 +544,18 @@ const App: React.FC = () => {
 
   const handleTestModelConfig = async (): Promise<LLMConfigTestResult> => testNativeModelConfig();
 
+  const handleRetryCaptureLog = async (logId: string) => {
+    if (!runningInAndroid) {
+      return;
+    }
+
+    const status = await retryNativeCaptureLog(logId);
+    setAutoBookkeepingSettings((previous) => ({
+      ...previous,
+      ...status,
+    }));
+  };
+
   const renderContent = () => {
     switch (activeTab) {
       case AppTab.DASHBOARD:
@@ -573,6 +586,7 @@ const App: React.FC = () => {
             onOpenAccessibilitySettings={handleOpenAccessibilitySettings}
             onTestModelConfig={handleTestModelConfig}
             onRefreshAutoBookkeepingStatus={refreshAutoBookkeepingStatus}
+            onRetryCaptureLog={handleRetryCaptureLog}
           />
         );
       default:

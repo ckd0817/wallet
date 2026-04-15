@@ -4,7 +4,9 @@ import android.content.Context;
 import android.util.Log;
 import com.smartwallet.app.ScreenCaptureBookkeepingPlugin;
 import com.smartwallet.app.data.WalletRepository;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.text.SimpleDateFormat;
 import java.util.Date;
@@ -16,30 +18,58 @@ import org.json.JSONObject;
 
 public final class CaptureProcessingEngine {
 
-    private static final String CAPTURE_LOG_DIR_NAME = "capture-logs";
     private static final String TAG = "SmartWalletCapture";
 
     private final Context appContext;
     private final CaptureAnalysisClient analysisClient = new CaptureAnalysisClient();
+    private final CaptureImageStore captureImageStore;
+    private final CaptureLogFactory captureLogFactory = new CaptureLogFactory();
     private final SimpleDateFormat dateFormatter = new SimpleDateFormat("yyyy-MM-dd", Locale.US);
     private final SimpleDateFormat timestampFormatter = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US);
 
     public CaptureProcessingEngine(Context context) {
         this.appContext = context.getApplicationContext();
+        this.captureImageStore = new CaptureImageStore(appContext.getFilesDir());
         timestampFormatter.setTimeZone(TimeZone.getTimeZone("UTC"));
     }
 
     public void processCapture(byte[] pngBytes) {
+        processCaptureBytes(pngBytes, saveCaptureImage(pngBytes));
+    }
+
+    public void retrySavedCapture(String imagePath, File imageFile) {
+        try {
+            processCaptureBytes(readImageBytes(imageFile), imagePath);
+        } catch (Exception exception) {
+            Log.e(TAG, "Retry capture analysis failed before request", exception);
+            recordFailure("retry_prepare", "原图不可用", imagePath);
+        }
+    }
+
+    public File resolveCaptureImageFile(String imagePath) {
+        return captureImageStore.resolveOwnedImageFile(imagePath);
+    }
+
+    public void recordFailure(String failureStage, String failureReason) {
+        recordFailure(failureStage, failureReason, "");
+    }
+
+    public void recordFailure(String failureStage, String failureReason, String imagePath) {
+        repository().upsertCaptureLog(captureLogFactory.createFailureLog(failureStage, failureReason, imagePath));
+        updateError(failureReason == null || failureReason.isEmpty() ? "截图失败" : failureReason);
+    }
+
+    private void processCaptureBytes(byte[] pngBytes, String imagePath) {
         JSONObject captureLog = null;
         try {
-            captureLog = createPendingCaptureLog(saveCaptureImage(pngBytes));
+            captureLog = captureLogFactory.createPendingLog(imagePath);
             repository().upsertCaptureLog(captureLog);
             emitStatus();
             NotificationHelper.showCaptureProcessing(appContext);
 
             CaptureAnalysisOutcome outcome = analysisClient.analyze(pngBytes, repository().getLlmConfig(), repository().getCategories());
             if (!outcome.isSupported()) {
-                repository().upsertCaptureLog(buildFinalCaptureLog(captureLog, outcome, null));
+                repository().upsertCaptureLog(captureLogFactory.createCompletedLog(captureLog, outcome, null));
                 updateError(outcome.getFailureReason().isEmpty() ? "截图分析失败" : outcome.getFailureReason());
                 return;
             }
@@ -47,7 +77,7 @@ public final class CaptureProcessingEngine {
             CaptureAnalysisResult result = outcome.getResult();
             JSONObject transaction = buildTransaction(result);
             repository().upsertTransaction(transaction);
-            repository().upsertCaptureLog(buildFinalCaptureLog(captureLog, outcome, transaction));
+            repository().upsertCaptureLog(captureLogFactory.createCompletedLog(captureLog, outcome, transaction));
             repository().saveAutoBookkeepingSettings(statusUpdate("", System.currentTimeMillis()));
             NotificationHelper.showCaptureResult(appContext, transaction);
             ScreenCaptureBookkeepingPlugin.emitCaptureRecorded(transaction);
@@ -55,25 +85,10 @@ public final class CaptureProcessingEngine {
         } catch (Exception exception) {
             Log.e(TAG, "Capture analysis failed", exception);
             if (captureLog != null) {
-                repository().upsertCaptureLog(buildUnexpectedFailureLog(captureLog, exception));
+                repository().upsertCaptureLog(captureLogFactory.createUnexpectedFailureLog(captureLog, resolveExceptionMessage(exception)));
             }
             updateError(resolveExceptionMessage(exception));
         }
-    }
-
-    public void recordFailure(String failureStage, String failureReason) {
-        JSONObject failureLog = new JSONObject();
-        safePut(failureLog, "id", UUID.randomUUID().toString());
-        safePut(failureLog, "capturedAt", formatTimestamp(System.currentTimeMillis()));
-        safePut(failureLog, "status", "failed");
-        safePut(failureLog, "failureStage", failureStage == null || failureStage.isEmpty() ? "pre_capture" : failureStage);
-        safePut(failureLog, "failureReason", failureReason == null || failureReason.isEmpty() ? "截图失败" : failureReason);
-        safePut(failureLog, "summary", failureReason == null || failureReason.isEmpty() ? "截图失败" : failureReason);
-        safePut(failureLog, "imagePath", "");
-        safePut(failureLog, "responseBodyRaw", "");
-        safePut(failureLog, "assistantReplyRaw", "");
-        repository().upsertCaptureLog(failureLog);
-        updateError(failureReason == null || failureReason.isEmpty() ? "截图失败" : failureReason);
     }
 
     private JSONObject buildTransaction(CaptureAnalysisResult result) {
@@ -100,54 +115,6 @@ public final class CaptureProcessingEngine {
         return transaction;
     }
 
-    private JSONObject createPendingCaptureLog(String imagePath) {
-        JSONObject log = new JSONObject();
-        safePut(log, "id", UUID.randomUUID().toString());
-        safePut(log, "capturedAt", formatTimestamp(System.currentTimeMillis()));
-        safePut(log, "status", "processing");
-        safePut(log, "imagePath", imagePath);
-        return log;
-    }
-
-    private JSONObject buildFinalCaptureLog(JSONObject pendingLog, CaptureAnalysisOutcome outcome, JSONObject transaction) {
-        JSONObject log = cloneObject(pendingLog);
-        safePut(log, "status", outcome.isSupported() ? "success" : "failed");
-        safePut(log, "failureStage", outcome.getFailureStage());
-        safePut(log, "failureReason", outcome.getFailureReason());
-        if (outcome.getHttpStatus() > 0) {
-            safePut(log, "httpStatus", outcome.getHttpStatus());
-        }
-        safePut(log, "responseBodyRaw", outcome.getResponseBodyRaw());
-        safePut(log, "assistantReplyRaw", outcome.getAssistantReplyRaw());
-
-        JSONObject assistantReplyParsed = outcome.getAssistantReplyParsed();
-        if (assistantReplyParsed != null) {
-            safePut(log, "assistantReplyParsed", assistantReplyParsed);
-        }
-
-        CaptureAnalysisResult result = outcome.getResult();
-        safePut(log, "summary", result.getSummary().isEmpty() ? outcome.getFailureReason() : result.getSummary());
-        safePut(log, "merchantName", result.getMerchantName());
-        if (result.getAmount() > 0d) {
-            safePut(log, "amount", result.getAmount());
-        }
-
-        if (transaction != null) {
-            safePut(log, "transactionId", transaction.optString("id", ""));
-        }
-
-        return log;
-    }
-
-    private JSONObject buildUnexpectedFailureLog(JSONObject pendingLog, Exception exception) {
-        JSONObject log = cloneObject(pendingLog);
-        safePut(log, "status", "failed");
-        safePut(log, "failureStage", "service_exception");
-        safePut(log, "failureReason", resolveExceptionMessage(exception));
-        safePut(log, "responseBodyRaw", "");
-        safePut(log, "assistantReplyRaw", "");
-        return log;
-    }
 
     private void updateError(String message) {
         repository().saveAutoBookkeepingSettings(statusUpdate(message, 0));
@@ -174,19 +141,25 @@ public final class CaptureProcessingEngine {
     }
 
     private String saveCaptureImage(byte[] pngBytes) {
-        File captureDir = new File(appContext.getFilesDir(), CAPTURE_LOG_DIR_NAME);
-        if (!captureDir.exists()) {
-            captureDir.mkdirs();
-        }
-
-        File imageFile = new File(captureDir, "capture_" + System.currentTimeMillis() + "_" + UUID.randomUUID() + ".png");
+        File imageFile = captureImageStore.createImageFile();
         try (FileOutputStream outputStream = new FileOutputStream(imageFile, false)) {
             outputStream.write(pngBytes);
             outputStream.flush();
-            return "file://" + imageFile.getAbsolutePath();
+            return captureImageStore.toStoredImagePath(imageFile);
         } catch (Exception exception) {
             Log.w(TAG, "Failed to persist capture image", exception);
             return "";
+        }
+    }
+
+    private byte[] readImageBytes(File imageFile) throws Exception {
+        try (FileInputStream inputStream = new FileInputStream(imageFile); ByteArrayOutputStream outputStream = new ByteArrayOutputStream()) {
+            byte[] buffer = new byte[8192];
+            int readLength;
+            while ((readLength = inputStream.read(buffer)) != -1) {
+                outputStream.write(buffer, 0, readLength);
+            }
+            return outputStream.toByteArray();
         }
     }
 
@@ -200,12 +173,6 @@ public final class CaptureProcessingEngine {
         }
     }
 
-    private String formatTimestamp(long timestamp) {
-        synchronized (timestampFormatter) {
-            return timestampFormatter.format(new Date(timestamp));
-        }
-    }
-
     private String resolveExceptionMessage(Exception exception) {
         if (exception == null || exception.getMessage() == null || exception.getMessage().trim().isEmpty()) {
             return "截图分析失败";
@@ -213,15 +180,9 @@ public final class CaptureProcessingEngine {
         return "截图分析失败: " + exception.getMessage().trim();
     }
 
-    private JSONObject cloneObject(JSONObject source) {
-        if (source == null) {
-            return new JSONObject();
-        }
-
-        try {
-            return new JSONObject(source.toString());
-        } catch (JSONException ignored) {
-            return new JSONObject();
+    private String formatTimestamp(long timestamp) {
+        synchronized (timestampFormatter) {
+            return timestampFormatter.format(new Date(timestamp));
         }
     }
 

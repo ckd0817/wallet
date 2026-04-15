@@ -15,8 +15,12 @@ import com.getcapacitor.annotation.Permission;
 import com.smartwallet.app.accessibility.AccessibilityCaptureService;
 import com.smartwallet.app.data.WalletRepository;
 import com.smartwallet.app.screencapture.CaptureAnalysisClient;
+import com.smartwallet.app.screencapture.CaptureProcessingEngine;
 import com.smartwallet.app.screencapture.NotificationHelper;
+import java.io.File;
 import java.lang.ref.WeakReference;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicReference;
 import org.json.JSONException;
 import org.json.JSONObject;
@@ -31,6 +35,7 @@ public class ScreenCaptureBookkeepingPlugin extends Plugin {
     private static final AtomicReference<WeakReference<ScreenCaptureBookkeepingPlugin>> ACTIVE_INSTANCE = new AtomicReference<>();
     private static volatile String pendingDeepLink;
     private final CaptureAnalysisClient analysisClient = new CaptureAnalysisClient();
+    private final ExecutorService retryExecutor = Executors.newSingleThreadExecutor();
 
     @Override
     public void load() {
@@ -49,6 +54,7 @@ public class ScreenCaptureBookkeepingPlugin extends Plugin {
         if (current != null && current.get() == this) {
             ACTIVE_INSTANCE.set(null);
         }
+        retryExecutor.shutdownNow();
         super.handleOnDestroy();
     }
 
@@ -68,6 +74,46 @@ public class ScreenCaptureBookkeepingPlugin extends Plugin {
     @PluginMethod
     public void captureNow(PluginCall call) {
         AccessibilityCaptureService.requestCapture(getContext());
+        call.resolve(buildStatus());
+    }
+
+    @PluginMethod
+    public void retryCaptureLog(PluginCall call) {
+        String logId = call.getString("logId", "").trim();
+        CaptureProcessingEngine processingEngine = new CaptureProcessingEngine(getContext());
+        if (logId.isEmpty()) {
+            processingEngine.recordFailure("retry_prepare", "未找到重试记录");
+            call.resolve(buildStatus());
+            return;
+        }
+
+        JSONObject captureLog = repository().getCaptureLogById(logId);
+        if (captureLog.length() == 0) {
+            processingEngine.recordFailure("retry_prepare", "未找到重试记录");
+            call.resolve(buildStatus());
+            return;
+        }
+
+        String imagePath = captureLog.optString("imagePath", "");
+        if (!"failed".equals(captureLog.optString("status", ""))) {
+            processingEngine.recordFailure("retry_prepare", "当前条目无法重试", imagePath);
+            call.resolve(buildStatus());
+            return;
+        }
+        if (imagePath.trim().isEmpty()) {
+            processingEngine.recordFailure("retry_prepare", "原图不可用");
+            call.resolve(buildStatus());
+            return;
+        }
+
+        File imageFile = processingEngine.resolveCaptureImageFile(imagePath);
+        if (imageFile == null || !imageFile.exists() || !imageFile.isFile()) {
+            processingEngine.recordFailure("retry_prepare", "原图不可用", imagePath);
+            call.resolve(buildStatus());
+            return;
+        }
+
+        retryExecutor.execute(() -> processingEngine.retrySavedCapture(imagePath, imageFile));
         call.resolve(buildStatus());
     }
 
