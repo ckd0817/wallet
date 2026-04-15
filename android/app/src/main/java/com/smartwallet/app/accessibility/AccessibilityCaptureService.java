@@ -31,20 +31,16 @@ import org.json.JSONObject;
 public class AccessibilityCaptureService extends AccessibilityService {
 
     public static final String ACTION_CAPTURE_NOW = "com.smartwallet.app.action.ACCESSIBILITY_CAPTURE_NOW";
-    private static final long UI_TRANSITION_TIMEOUT_MS = 2500L;
-    private static final long UI_STABLE_DELAY_MS = 350L;
-    private static final String SYSTEM_UI_PACKAGE = "com.android.systemui";
+    private static final long SCREENSHOT_DELAY_MS = 350L;
     private static final String TAG = "SmartWalletCapture";
     private static final AtomicReference<WeakReference<AccessibilityCaptureService>> ACTIVE_INSTANCE = new AtomicReference<>();
 
     private final AtomicBoolean captureInProgress = new AtomicBoolean(false);
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
-    private final Runnable uiTransitionTimeoutRunnable = this::handleUiTransitionTimeout;
-    private final Runnable stableWindowCaptureRunnable =
-        () -> takeScreenshotWhenReady("stable-window-ready");
+    private volatile String pendingScreenshotReason = "delayed-after-notification";
+    private final Runnable delayedScreenshotRunnable = () -> takeScreenshotNow(pendingScreenshotReason);
     private ExecutorService captureExecutor;
     private CaptureProcessingEngine processingEngine;
-    private volatile boolean waitingForStableWindow;
 
     public static boolean isConnected() {
         WeakReference<AccessibilityCaptureService> reference = ACTIVE_INSTANCE.get();
@@ -123,20 +119,7 @@ public class AccessibilityCaptureService extends AccessibilityService {
     }
 
     @Override
-    public void onAccessibilityEvent(AccessibilityEvent event) {
-        if (!captureInProgress.get() || !waitingForStableWindow || event == null) {
-            return;
-        }
-
-        String packageName = event.getPackageName() == null ? "" : event.getPackageName().toString();
-        if (packageName.isEmpty() || isSystemUiPackage(packageName)) {
-            mainHandler.removeCallbacks(stableWindowCaptureRunnable);
-            return;
-        }
-
-        mainHandler.removeCallbacks(stableWindowCaptureRunnable);
-        mainHandler.postDelayed(stableWindowCaptureRunnable, UI_STABLE_DELAY_MS);
-    }
+    public void onAccessibilityEvent(AccessibilityEvent event) {}
 
     @Override
     public void onInterrupt() {}
@@ -157,7 +140,7 @@ public class AccessibilityCaptureService extends AccessibilityService {
             captureExecutor.shutdownNow();
             captureExecutor = null;
         }
-        resetPendingCaptureState();
+        mainHandler.removeCallbacks(delayedScreenshotRunnable);
         persistCapabilityStatus(null);
         super.onDestroy();
     }
@@ -173,29 +156,24 @@ public class AccessibilityCaptureService extends AccessibilityService {
         }
 
         NotificationHelper.showReadyNotification(this, true);
-        waitingForStableWindow = true;
-        mainHandler.removeCallbacks(uiTransitionTimeoutRunnable);
-        mainHandler.removeCallbacks(stableWindowCaptureRunnable);
-        mainHandler.postDelayed(uiTransitionTimeoutRunnable, UI_TRANSITION_TIMEOUT_MS);
 
         Log.i(TAG, "Accessibility screenshot requested; dismissing notification shade first");
         boolean dismissed = performGlobalAction(GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE);
         if (!dismissed) {
             Log.w(TAG, "Failed to dismiss notification shade before capture");
-            processingEngine.recordFailure("dismiss_notification", getString(R.string.screen_capture_error_dismiss_notification));
-            finishCapture();
         }
+
+        pendingScreenshotReason = dismissed ? "dismiss-notification-delayed" : "dismiss-notification-failed-delayed";
+        mainHandler.removeCallbacks(delayedScreenshotRunnable);
+        mainHandler.postDelayed(delayedScreenshotRunnable, SCREENSHOT_DELAY_MS);
     }
 
-    private void takeScreenshotWhenReady(String reason) {
+    private void takeScreenshotNow(String reason) {
         if (!captureInProgress.get()) {
             return;
         }
 
-        waitingForStableWindow = false;
-        mainHandler.removeCallbacks(stableWindowCaptureRunnable);
-        mainHandler.removeCallbacks(uiTransitionTimeoutRunnable);
-        Log.i(TAG, "Target window stabilized; taking screenshot, reason=" + reason);
+        Log.i(TAG, "Taking screenshot immediately, reason=" + reason);
         takeScreenshot(
             Display.DEFAULT_DISPLAY,
             getMainExecutor(),
@@ -244,24 +222,8 @@ public class AccessibilityCaptureService extends AccessibilityService {
 
     private void finishCapture() {
         captureInProgress.set(false);
-        resetPendingCaptureState();
+        mainHandler.removeCallbacks(delayedScreenshotRunnable);
         syncReadyNotification(this);
-    }
-
-    private void resetPendingCaptureState() {
-        waitingForStableWindow = false;
-        mainHandler.removeCallbacks(stableWindowCaptureRunnable);
-        mainHandler.removeCallbacks(uiTransitionTimeoutRunnable);
-    }
-
-    private void handleUiTransitionTimeout() {
-        if (!captureInProgress.get()) {
-            return;
-        }
-
-        Log.w(TAG, "Timed out waiting for target window after notification click");
-        processingEngine.recordFailure("ui_transition_timeout", getString(R.string.screen_capture_error_transition_timeout));
-        finishCapture();
     }
 
     private void persistCapabilityStatus(String lastError) {
@@ -354,10 +316,6 @@ public class AccessibilityCaptureService extends AccessibilityService {
             return getString(R.string.screen_capture_error_invalid_window);
         }
         return getString(R.string.screen_capture_error_generic);
-    }
-
-    private boolean isSystemUiPackage(String packageName) {
-        return SYSTEM_UI_PACKAGE.equals(packageName);
     }
 
     private String resolveExceptionMessage(Exception exception) {
