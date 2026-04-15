@@ -13,7 +13,6 @@
     <string name="screen_capture_notification_title">截图记账已就绪</string>
     <string name="screen_capture_notification_text">点通知即可截图记账</string>
     <string name="screen_capture_notification_progress_text">正在识别</string>
-    <string name="screen_capture_capture_action">截屏记账</string>
     <string name="screen_capture_success_title">识别完成</string>
     <string name="screen_capture_failure_title">识别失败</string>
     <string name="screen_capture_error_generic">截图失败，请稍后重试</string>
