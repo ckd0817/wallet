@@ -54,6 +54,11 @@ public class AssetQuoteClient {
         }
 
         if (stockQuery.length() > 0) {
+            stockQuery.append(",");
+        }
+        stockQuery.append("sh000001");
+
+        if (stockQuery.length() > 0) {
             JSONArray stockQuotes = fetchStockQuotes(stockQuery.toString());
             for (int index = 0; index < stockQuotes.length(); index++) {
                 quotes.put(stockQuotes.optJSONObject(index));
@@ -108,13 +113,14 @@ public class AssetQuoteClient {
             }
 
             JSONObject quote = new JSONObject();
-            safePut(quote, "assetType", "stock");
+            boolean isIndex = "sh".equals(market) && "000001".equals(code);
+            safePut(quote, "assetType", isIndex ? "index" : "stock");
             safePut(quote, "code", code);
             safePut(quote, "name", fields[1]);
             safePut(quote, "price", price);
             safePut(quote, "changePercent", parseDouble(fields[32]));
             safePut(quote, "quoteTime", formatTencentTime(fields[30]));
-            safePut(quote, "source", "tencent-" + market);
+            safePut(quote, "source", isIndex ? "tencent-index-sh" : "tencent-" + market);
             safePut(quote, "syncedAt", syncedAt);
             quotes.put(quote);
         }

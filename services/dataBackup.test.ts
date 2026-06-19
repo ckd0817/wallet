@@ -13,7 +13,7 @@ describe('dataBackup', () => {
       recurringProfiles: [],
     });
 
-    expect((payload.data as Record<string, unknown>).captureLogs).toBeUndefined();
+    expect((payload.data as unknown as Record<string, unknown>).captureLogs).toBeUndefined();
   });
 
   it('exports and parses custom categories alongside transactions', () => {
@@ -136,6 +136,36 @@ describe('dataBackup', () => {
     const payload = buildBackupPayload({
       ...buildDefaultSnapshot(),
       assetHoldings: [holding],
+      assetPerformanceHistory: [
+        {
+          date: '2026-06-18',
+          marketValue: 2400,
+          costAmount: 1800,
+          totalProfit: 600,
+          totalProfitRate: 33.3333,
+          dailyProfit: 24,
+          dailyProfitRate: 1,
+          benchmarkName: '上证指数',
+          benchmarkChangePercent: 0.5,
+          capturedAt: '2026-06-18T08:00:00.000Z',
+        },
+      ],
+      assetTradeRecords: [
+        {
+          id: 'trade-1',
+          holdingId: holding.id,
+          assetType: 'fund',
+          code: holding.code,
+          name: holding.name,
+          tradeType: 'buy',
+          source: 'manual',
+          shares: 1200,
+          amount: 1800,
+          price: 1.5,
+          occurredAt: '2026-06-18T08:00:00.000Z',
+          createdAt: '2026-06-18T08:00:00.000Z',
+        },
+      ],
     });
     const parsed = parseBackupFile(JSON.stringify(payload));
 
@@ -143,6 +173,15 @@ describe('dataBackup', () => {
       id: holding.id,
       code: holding.code,
       shares: holding.shares,
+    });
+    expect(parsed.assetPerformanceHistory[0]).toMatchObject({
+      date: '2026-06-18',
+      totalProfit: 600,
+    });
+    expect(parsed.assetTradeRecords[0]).toMatchObject({
+      id: 'trade-1',
+      tradeType: 'buy',
+      amount: 1800,
     });
   });
 });

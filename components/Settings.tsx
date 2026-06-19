@@ -22,7 +22,9 @@ import { Directory, Encoding, Filesystem } from '@capacitor/filesystem';
 import {
   AutoBookkeepingSettings,
   AssetHolding,
+  AssetPerformanceSnapshot,
   AssetRecurringPlan,
+  AssetTradeRecord,
   CaptureAttemptLog,
   Category,
   LLMConfig,
@@ -41,6 +43,8 @@ interface SettingsProps {
   recurringProfiles: RecurringProfile[];
   assetHoldings: AssetHolding[];
   assetRecurringPlans: AssetRecurringPlan[];
+  assetPerformanceHistory: AssetPerformanceSnapshot[];
+  assetTradeRecords: AssetTradeRecord[];
   llmConfig: LLMConfig;
   autoBookkeepingSettings: AutoBookkeepingSettings;
   captureLogs: CaptureAttemptLog[];
@@ -59,6 +63,8 @@ const Settings: React.FC<SettingsProps> = ({
   recurringProfiles,
   assetHoldings,
   assetRecurringPlans,
+  assetPerformanceHistory,
+  assetTradeRecords,
   llmConfig,
   autoBookkeepingSettings,
   captureLogs,
@@ -170,6 +176,8 @@ const Settings: React.FC<SettingsProps> = ({
         recurringProfiles,
         assetHoldings,
         assetRecurringPlans,
+        assetPerformanceHistory,
+        assetTradeRecords,
       }),
       null,
       2,
@@ -310,7 +318,9 @@ const Settings: React.FC<SettingsProps> = ({
             <div>
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                 {statusCards.map(({ icon: Icon, label, value }) => (
-                  <StatusCard key={label} icon={Icon} label={label} value={value} />
+                  <React.Fragment key={label}>
+                    <StatusCard icon={Icon} label={label} value={value} />
+                  </React.Fragment>
                 ))}
               </div>
 

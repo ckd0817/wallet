@@ -2,7 +2,12 @@ import { describe, expect, it } from 'vitest';
 
 import {
   applyAssetRecurringPurchase,
+  applyAssetRecurringPurchaseWithQuote,
+  buildAssetHoldingDistribution,
+  buildAssetPerformanceSnapshot,
+  buildAssetPositions,
   calculateNextAssetRecurringDate,
+  mergeAssetPerformanceHistory,
   normalizeAssetImportCandidate,
   parseFundQuoteResponse,
   parseTencentStockQuoteResponse,
@@ -28,7 +33,7 @@ describe('assetEngine', () => {
 
   it('解析腾讯 A 股行情文本', () => {
     const quotes = parseTencentStockQuoteResponse(
-      'v_sh600000="1~浦发银行~600000~9.09~9.24~9.20~~~~~~~~~~~~~~~~~~~~~~~~~20260618161420~-0.15~-1.62~";',
+      'v_sh600000="1~浦发银行~600000~9.09~9.24~9.20~~~~~~~~~~~~~~~~~~~~~~~~~20260618161420~-0.15~-1.62~";v_sh000001="1~上证指数~000001~3000.00~2990.00~2995.00~~~~~~~~~~~~~~~~~~~~~~~~~20260618161420~10.00~0.33~";',
       '2026-06-18T08:00:00.000Z',
     );
 
@@ -38,6 +43,12 @@ describe('assetEngine', () => {
       name: '浦发银行',
       price: 9.09,
       changePercent: -1.62,
+    });
+    expect(quotes[1]).toMatchObject({
+      assetType: 'index',
+      code: '000001',
+      name: '上证指数',
+      changePercent: 0.33,
     });
   });
 
@@ -50,6 +61,8 @@ describe('assetEngine', () => {
 
     expect(snapshot.assetHoldings).toEqual([]);
     expect(snapshot.assetQuoteCache).toEqual([]);
+    expect(snapshot.assetPerformanceHistory).toEqual([]);
+    expect(snapshot.assetTradeRecords).toEqual([]);
   });
 
   it('小数持仓成本按单位成本归一为总成本', () => {
@@ -162,5 +175,217 @@ describe('assetEngine', () => {
     );
 
     expect(execution).toBeNull();
+  });
+
+  it('节假日旧行情不执行定投', () => {
+    const execution = applyAssetRecurringPurchaseWithQuote(
+      {
+        id: 'holding-1',
+        assetType: 'fund',
+        code: '000001',
+        market: 'fund',
+        name: '华夏成长混合',
+        shares: 100,
+        costAmount: 200,
+        createdAt: '2026-06-01T00:00:00.000Z',
+        updatedAt: '2026-06-01T00:00:00.000Z',
+      },
+      {
+        id: 'plan-1',
+        holdingId: 'holding-1',
+        amount: 100,
+        frequency: 'daily',
+        startDate: '2026-06-20',
+        nextDueDate: '2026-06-20',
+        enabled: true,
+        createdAt: '2026-06-01T00:00:00.000Z',
+        updatedAt: '2026-06-01T00:00:00.000Z',
+      },
+      {
+        assetType: 'fund',
+        code: '000001',
+        name: '华夏成长混合',
+        price: 2,
+        changePercent: 1,
+        quoteTime: '2026-06-19 15:00',
+        source: 'eastmoney-fund',
+        syncedAt: '2026-06-20T08:00:00.000Z',
+      },
+      '2026-06-20',
+    );
+
+    expect(execution).toBeNull();
+  });
+
+  it('节假日顺延到下一个交易日只执行一笔', () => {
+    const execution = applyAssetRecurringPurchaseWithQuote(
+      {
+        id: 'holding-1',
+        assetType: 'fund',
+        code: '000001',
+        market: 'fund',
+        name: '华夏成长混合',
+        shares: 100,
+        costAmount: 200,
+        createdAt: '2026-06-01T00:00:00.000Z',
+        updatedAt: '2026-06-01T00:00:00.000Z',
+      },
+      {
+        id: 'plan-1',
+        holdingId: 'holding-1',
+        amount: 100,
+        frequency: 'daily',
+        startDate: '2026-06-20',
+        nextDueDate: '2026-06-20',
+        enabled: true,
+        createdAt: '2026-06-01T00:00:00.000Z',
+        updatedAt: '2026-06-01T00:00:00.000Z',
+      },
+      {
+        assetType: 'fund',
+        code: '000001',
+        name: '华夏成长混合',
+        price: 2,
+        changePercent: 1,
+        quoteTime: '2026-06-22 15:00',
+        source: 'eastmoney-fund',
+        syncedAt: '2026-06-22T08:00:00.000Z',
+      },
+      '2026-06-22',
+    );
+
+    expect(execution?.addedShares).toBe(50);
+    expect(execution?.holding.shares).toBe(150);
+    expect(execution?.plan.nextDueDate).toBe('2026-06-23');
+  });
+
+  it('生成并合并资产表现历史', () => {
+    const positions = buildAssetPositions(
+      [
+        {
+          id: 'holding-1',
+          assetType: 'fund',
+          code: '000001',
+          market: 'fund',
+          name: '华夏成长混合',
+          shares: 100,
+          costAmount: 180,
+          createdAt: '2026-06-01T00:00:00.000Z',
+          updatedAt: '2026-06-01T00:00:00.000Z',
+        },
+      ],
+      [
+        {
+          assetType: 'fund',
+          code: '000001',
+          name: '华夏成长混合',
+          price: 2,
+          changePercent: 1,
+          quoteTime: '2026-06-18 15:00',
+          source: 'eastmoney-fund',
+          syncedAt: '2026-06-18T08:00:00.000Z',
+        },
+      ],
+    );
+
+    const snapshot = buildAssetPerformanceSnapshot(
+      positions,
+      {
+        assetType: 'index',
+        code: '000001',
+        name: '上证指数',
+        price: 3000,
+        changePercent: 0.33,
+        quoteTime: '2026-06-18 15:00',
+        source: 'tencent-index-sh',
+        syncedAt: '2026-06-18T08:00:00.000Z',
+      },
+      '2026-06-18T08:00:00.000Z',
+    );
+    const history = mergeAssetPerformanceHistory(
+      [
+        {
+          date: '2026-06-18',
+          marketValue: 100,
+          costAmount: 100,
+          totalProfit: 0,
+          totalProfitRate: 0,
+          dailyProfit: 0,
+          dailyProfitRate: 0,
+          benchmarkName: '',
+          benchmarkChangePercent: 0,
+          capturedAt: '2026-06-18T07:00:00.000Z',
+        },
+      ],
+      snapshot,
+    );
+
+    expect(snapshot).toMatchObject({
+      date: '2026-06-18',
+      marketValue: 200,
+      costAmount: 180,
+      totalProfit: 20,
+      benchmarkName: '上证指数',
+      benchmarkChangePercent: 0.33,
+    });
+    expect(snapshot?.dailyProfit).toBeCloseTo(1.98, 2);
+    expect(history).toHaveLength(1);
+    expect(history[0].marketValue).toBe(200);
+  });
+
+  it('计算持仓分布占比', () => {
+    const distribution = buildAssetHoldingDistribution(
+      buildAssetPositions(
+        [
+          {
+            id: 'holding-1',
+            assetType: 'fund',
+            code: '000001',
+            market: 'fund',
+            name: 'A基金',
+            shares: 100,
+            costAmount: 100,
+            createdAt: '2026-06-01T00:00:00.000Z',
+            updatedAt: '2026-06-01T00:00:00.000Z',
+          },
+          {
+            id: 'holding-2',
+            assetType: 'stock',
+            code: '600000',
+            market: 'sh',
+            name: '浦发银行',
+            shares: 50,
+            costAmount: 100,
+            createdAt: '2026-06-01T00:00:00.000Z',
+            updatedAt: '2026-06-01T00:00:00.000Z',
+          },
+        ],
+        [
+          {
+            assetType: 'fund',
+            code: '000001',
+            name: 'A基金',
+            price: 2,
+            changePercent: 0,
+            quoteTime: '',
+            source: 'test',
+            syncedAt: '2026-06-18T08:00:00.000Z',
+          },
+          {
+            assetType: 'stock',
+            code: '600000',
+            name: '浦发银行',
+            price: 2,
+            changePercent: 0,
+            quoteTime: '',
+            source: 'test',
+            syncedAt: '2026-06-18T08:00:00.000Z',
+          },
+        ],
+      ),
+    );
+
+    expect(distribution[0]).toMatchObject({ name: 'A基金', value: 200 });
+    expect(distribution[0].percent).toBeCloseTo(66.67, 2);
   });
 });

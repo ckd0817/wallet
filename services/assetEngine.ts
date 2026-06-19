@@ -2,6 +2,7 @@ import {
   AssetHolding,
   AssetImportCandidate,
   AssetMarket,
+  AssetPerformanceSnapshot,
   AssetQuote,
   AssetRecurringFrequency,
   AssetRecurringPlan,
@@ -28,16 +29,27 @@ export interface AssetPortfolioSummary {
   latestSyncedAt: string;
 }
 
+export interface AssetHoldingDistributionItem {
+  id: string;
+  name: string;
+  value: number;
+  percent: number;
+  color: string;
+}
+
 export interface AssetRecurringExecution {
   holding: AssetHolding;
   plan: AssetRecurringPlan;
   addedShares: number;
+  executionDate?: string;
 }
 
 export const normalizeAssetCode = (code: string) => code.trim().replace(/\D/g, '').slice(0, 6);
 
 const normalizeAmount = (value: unknown) =>
   typeof value === 'number' && Number.isFinite(value) ? Math.max(0, value) : 0;
+
+const DISTRIBUTION_COLORS = ['#ef4444', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#06b6d4'];
 
 export const inferAssetMarket = (assetType: AssetType, code: string): AssetMarket => {
   if (assetType === 'fund') {
@@ -89,6 +101,48 @@ export const applyAssetRecurringPurchase = (
   };
 };
 
+export const applyAssetRecurringPurchaseWithQuote = (
+  holding: AssetHolding,
+  plan: AssetRecurringPlan,
+  quote: AssetQuote,
+  today = new Date().toISOString().split('T')[0],
+): AssetRecurringExecution | null => {
+  if (holding.assetType !== 'fund' || !plan.enabled || plan.amount <= 0 || quote.price <= 0 || plan.nextDueDate > today) {
+    return null;
+  }
+
+  const quoteDate = getAssetQuoteDate(quote);
+  if (!quoteDate || quoteDate !== today || quoteDate < plan.nextDueDate) {
+    return null;
+  }
+
+  const addedShares = plan.amount / quote.price;
+  return {
+    holding: {
+      ...holding,
+      shares: holding.shares + addedShares,
+      costAmount: holding.costAmount + plan.amount,
+      updatedAt: new Date().toISOString(),
+    },
+    plan: advanceAssetRecurringPlanPastDate(plan, quoteDate),
+    addedShares,
+    executionDate: quoteDate,
+  };
+};
+
+export const advanceAssetRecurringPlanPastDate = (plan: AssetRecurringPlan, date: string): AssetRecurringPlan => {
+  let nextDueDate = plan.nextDueDate;
+  while (nextDueDate <= date) {
+    nextDueDate = calculateNextAssetRecurringDate(nextDueDate, plan.frequency);
+  }
+
+  return {
+    ...plan,
+    nextDueDate,
+    updatedAt: new Date().toISOString(),
+  };
+};
+
 export const normalizeAssetHolding = (holding: Partial<AssetHolding>): AssetHolding | null => {
   const assetType = holding.assetType === 'fund' ? 'fund' : 'stock';
   const code = normalizeAssetCode(holding.code ?? '');
@@ -114,7 +168,7 @@ export const normalizeAssetHolding = (holding: Partial<AssetHolding>): AssetHold
 };
 
 export const normalizeAssetQuote = (quote: Partial<AssetQuote>): AssetQuote | null => {
-  const assetType = quote.assetType === 'fund' ? 'fund' : 'stock';
+  const assetType = quote.assetType === 'fund' ? 'fund' : quote.assetType === 'index' ? 'index' : 'stock';
   const code = normalizeAssetCode(quote.code ?? '');
   if (!code) {
     return null;
@@ -132,6 +186,64 @@ export const normalizeAssetQuote = (quote: Partial<AssetQuote>): AssetQuote | nu
     syncedAt: typeof quote.syncedAt === 'string' && quote.syncedAt ? quote.syncedAt : new Date().toISOString(),
     error: typeof quote.error === 'string' && quote.error ? quote.error : undefined,
   };
+};
+
+export const normalizeAssetPerformanceSnapshot = (
+  snapshot: Partial<AssetPerformanceSnapshot>,
+): AssetPerformanceSnapshot | null => {
+  const rawDate = typeof snapshot.date === 'string' ? snapshot.date : '';
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(rawDate)
+    ? rawDate
+    : typeof snapshot.capturedAt === 'string' && snapshot.capturedAt
+      ? snapshot.capturedAt.split('T')[0]
+      : '';
+
+  if (!date) {
+    return null;
+  }
+
+  return {
+    date,
+    marketValue: normalizeAmount(snapshot.marketValue),
+    costAmount: normalizeAmount(snapshot.costAmount),
+    totalProfit:
+      typeof snapshot.totalProfit === 'number' && Number.isFinite(snapshot.totalProfit) ? snapshot.totalProfit : 0,
+    totalProfitRate:
+      typeof snapshot.totalProfitRate === 'number' && Number.isFinite(snapshot.totalProfitRate)
+        ? snapshot.totalProfitRate
+        : 0,
+    dailyProfit:
+      typeof snapshot.dailyProfit === 'number' && Number.isFinite(snapshot.dailyProfit) ? snapshot.dailyProfit : 0,
+    dailyProfitRate:
+      typeof snapshot.dailyProfitRate === 'number' && Number.isFinite(snapshot.dailyProfitRate)
+        ? snapshot.dailyProfitRate
+        : 0,
+    benchmarkName: typeof snapshot.benchmarkName === 'string' ? snapshot.benchmarkName : '',
+    benchmarkChangePercent:
+      typeof snapshot.benchmarkChangePercent === 'number' && Number.isFinite(snapshot.benchmarkChangePercent)
+        ? snapshot.benchmarkChangePercent
+        : 0,
+    capturedAt: typeof snapshot.capturedAt === 'string' && snapshot.capturedAt ? snapshot.capturedAt : `${date}T00:00:00.000Z`,
+  };
+};
+
+export const getAssetQuoteDate = (quote?: Pick<AssetQuote, 'quoteTime' | 'syncedAt'> | null) => {
+  if (!quote) {
+    return '';
+  }
+
+  const rawQuoteTime = quote.quoteTime ?? '';
+  const dateMatch = rawQuoteTime.match(/(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+  if (dateMatch) {
+    return `${dateMatch[1]}-${dateMatch[2].padStart(2, '0')}-${dateMatch[3].padStart(2, '0')}`;
+  }
+
+  const compactMatch = rawQuoteTime.match(/(\d{4})(\d{2})(\d{2})/);
+  if (compactMatch) {
+    return `${compactMatch[1]}-${compactMatch[2]}-${compactMatch[3]}`;
+  }
+
+  return typeof quote.syncedAt === 'string' && quote.syncedAt ? quote.syncedAt.split('T')[0] : '';
 };
 
 export const parseFundQuoteResponse = (content: string, syncedAt = new Date().toISOString()): AssetQuote | null => {
@@ -179,13 +291,13 @@ export const parseTencentStockQuoteResponse = (content: string, syncedAt = new D
     }
 
     quotes.push({
-      assetType: 'stock',
+      assetType: market === 'sh' && code === '000001' ? 'index' : 'stock',
       code,
       name,
       price,
       changePercent: Number.isFinite(changePercent) ? changePercent : 0,
       quoteTime: formatTencentQuoteTime(rawTime),
-      source: `tencent-${market}`,
+      source: market === 'sh' && code === '000001' ? 'tencent-index-sh' : `tencent-${market}`,
       syncedAt,
     });
   }
@@ -208,9 +320,16 @@ export const buildAssetPositions = (holdings: AssetHolding[], quotes: AssetQuote
     const marketValue = holding.shares * price;
     const profit = marketValue - holding.costAmount;
     const profitRate = holding.costAmount > 0 ? (profit / holding.costAmount) * 100 : 0;
-    const dailyChangeAmount = quote ? marketValue * (quote.changePercent / 100) : 0;
+    const dailyChangeAmount = quote ? calculateDailyChangeAmount(marketValue, quote.changePercent) : 0;
     return { holding, quote, marketValue, profit, profitRate, dailyChangeAmount };
   });
+};
+
+const calculateDailyChangeAmount = (marketValue: number, changePercent: number) => {
+  if (!Number.isFinite(marketValue) || !Number.isFinite(changePercent) || marketValue <= 0 || changePercent <= -100) {
+    return 0;
+  }
+  return marketValue - marketValue / (1 + changePercent / 100);
 };
 
 export const buildAssetSummary = (positions: AssetPositionView[]): AssetPortfolioSummary => {
@@ -231,6 +350,79 @@ export const buildAssetSummary = (positions: AssetPositionView[]): AssetPortfoli
     dailyChangeAmount: positions.reduce((sum, position) => sum + position.dailyChangeAmount, 0),
     latestSyncedAt,
   };
+};
+
+export const buildAssetPerformanceSnapshot = (
+  positions: AssetPositionView[],
+  benchmarkQuote?: AssetQuote,
+  capturedAt = new Date().toISOString(),
+): AssetPerformanceSnapshot | null => {
+  if (positions.length === 0 || positions.every((position) => !position.quote)) {
+    return null;
+  }
+
+  const summary = buildAssetSummary(positions);
+  const baseValue = summary.totalMarketValue - summary.dailyChangeAmount;
+  const capturedDate = capturedAt.split('T')[0];
+  const benchmarkDate = getAssetQuoteDate(benchmarkQuote);
+  if (!benchmarkQuote || !benchmarkDate || benchmarkDate !== capturedDate) {
+    return null;
+  }
+
+  return {
+    date: capturedDate,
+    marketValue: summary.totalMarketValue,
+    costAmount: summary.totalCost,
+    totalProfit: summary.totalProfit,
+    totalProfitRate: summary.totalProfitRate,
+    dailyProfit: summary.dailyChangeAmount,
+    dailyProfitRate: baseValue > 0 ? (summary.dailyChangeAmount / baseValue) * 100 : 0,
+    benchmarkName: benchmarkQuote?.name ?? '',
+    benchmarkChangePercent: benchmarkQuote?.changePercent ?? 0,
+    capturedAt,
+  };
+};
+
+export const mergeAssetPerformanceHistory = (
+  history: AssetPerformanceSnapshot[] = [],
+  snapshot: AssetPerformanceSnapshot | null,
+  maxDays = 370,
+) => {
+  const merged = new Map<string, AssetPerformanceSnapshot>();
+
+  history
+    .map((item) => normalizeAssetPerformanceSnapshot(item))
+    .filter((item): item is AssetPerformanceSnapshot => Boolean(item))
+    .forEach((item) => {
+      merged.set(item.date, item);
+    });
+
+  const normalizedSnapshot = snapshot ? normalizeAssetPerformanceSnapshot(snapshot) : null;
+  if (normalizedSnapshot) {
+    merged.set(normalizedSnapshot.date, normalizedSnapshot);
+  }
+
+  return Array.from(merged.values())
+    .sort((left, right) => left.date.localeCompare(right.date))
+    .slice(-maxDays);
+};
+
+export const buildAssetHoldingDistribution = (positions: AssetPositionView[]): AssetHoldingDistributionItem[] => {
+  const total = positions.reduce((sum, position) => sum + position.marketValue, 0);
+  if (total <= 0) {
+    return [];
+  }
+
+  return positions
+    .filter((position) => position.marketValue > 0)
+    .sort((left, right) => right.marketValue - left.marketValue)
+    .map((position, index) => ({
+      id: position.holding.id,
+      name: position.quote?.name || position.holding.name || position.holding.code,
+      value: position.marketValue,
+      percent: (position.marketValue / total) * 100,
+      color: DISTRIBUTION_COLORS[index % DISTRIBUTION_COLORS.length],
+    }));
 };
 
 export const normalizeAssetImportCandidate = (candidate: Partial<AssetImportCandidate>): AssetImportCandidate | null => {

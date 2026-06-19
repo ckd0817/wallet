@@ -47,6 +47,8 @@ public final class WalletDefaults {
         safePut(object, "assetHoldings", new JSONArray());
         safePut(object, "assetQuoteCache", new JSONArray());
         safePut(object, "assetRecurringPlans", new JSONArray());
+        safePut(object, "assetPerformanceHistory", new JSONArray());
+        safePut(object, "assetTradeRecords", new JSONArray());
         safePut(object, "llmConfig", defaultLlmConfig());
         safePut(object, "autoBookkeepingSettings", defaultAutoBookkeepingSettings());
         return object;
@@ -85,6 +87,8 @@ public final class WalletDefaults {
         safePut(merged, "assetHoldings", cloneArray(candidate.optJSONArray("assetHoldings")));
         safePut(merged, "assetQuoteCache", cloneArray(candidate.optJSONArray("assetQuoteCache")));
         safePut(merged, "assetRecurringPlans", cloneArray(candidate.optJSONArray("assetRecurringPlans")));
+        safePut(merged, "assetPerformanceHistory", cloneArray(candidate.optJSONArray("assetPerformanceHistory")));
+        safePut(merged, "assetTradeRecords", cloneArray(candidate.optJSONArray("assetTradeRecords")));
 
         JSONArray categories = candidate.optJSONArray("categories");
         safePut(merged, "categories", mergeCategories(categories));

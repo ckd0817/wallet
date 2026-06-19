@@ -57,8 +57,11 @@ export interface RecurringProfile {
 }
 
 export type AssetType = 'stock' | 'fund';
+export type AssetQuoteType = AssetType | 'index';
 export type AssetMarket = 'sh' | 'sz' | 'fund';
 export type AssetRecurringFrequency = 'daily' | 'weekly' | 'monthly';
+export type AssetTradeType = 'buy' | 'sell' | 'recurring';
+export type AssetTradeSource = 'manual' | 'recurring';
 
 export interface AssetHolding {
   id: string;
@@ -73,7 +76,7 @@ export interface AssetHolding {
 }
 
 export interface AssetQuote {
-  assetType: AssetType;
+  assetType: AssetQuoteType;
   code: string;
   name: string;
   price: number;
@@ -109,6 +112,34 @@ export interface AssetRecurringPlan {
   enabled: boolean;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface AssetPerformanceSnapshot {
+  date: string;
+  marketValue: number;
+  costAmount: number;
+  totalProfit: number;
+  totalProfitRate: number;
+  dailyProfit: number;
+  dailyProfitRate: number;
+  benchmarkName: string;
+  benchmarkChangePercent: number;
+  capturedAt: string;
+}
+
+export interface AssetTradeRecord {
+  id: string;
+  holdingId: string;
+  assetType: AssetType;
+  code: string;
+  name: string;
+  tradeType: AssetTradeType;
+  source: AssetTradeSource;
+  shares: number;
+  amount: number;
+  price: number;
+  occurredAt: string;
+  createdAt: string;
 }
 
 export interface AssetScreenshotAnalysisResult {
@@ -176,6 +207,8 @@ export interface WalletSnapshot {
   assetHoldings: AssetHolding[];
   assetQuoteCache: AssetQuote[];
   assetRecurringPlans: AssetRecurringPlan[];
+  assetPerformanceHistory: AssetPerformanceSnapshot[];
+  assetTradeRecords: AssetTradeRecord[];
   llmConfig: LLMConfig;
   autoBookkeepingSettings: AutoBookkeepingSettings;
 }
@@ -186,6 +219,8 @@ export interface WalletBackupData {
   recurringProfiles: RecurringProfile[];
   assetHoldings: AssetHolding[];
   assetRecurringPlans: AssetRecurringPlan[];
+  assetPerformanceHistory: AssetPerformanceSnapshot[];
+  assetTradeRecords: AssetTradeRecord[];
 }
 
 export interface WalletBackupFile {

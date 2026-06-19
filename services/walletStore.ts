@@ -4,9 +4,11 @@ import { DEFAULT_CATEGORIES, mergeDefaultCategories } from '../constants';
 import {
   AutoBookkeepingSettings,
   AssetHolding,
+  AssetPerformanceSnapshot,
   AssetQuote,
   AssetRecurringPlan,
   AssetScreenshotAnalysisResult,
+  AssetTradeRecord,
   CaptureAttemptLog,
   Category,
   LLMConfig,
@@ -17,6 +19,7 @@ import {
 } from '../types';
 import {
   normalizeAssetHolding,
+  normalizeAssetPerformanceSnapshot,
   normalizeAssetQuote,
   parseFundQuoteResponse,
   parseTencentStockQuoteResponse,
@@ -31,6 +34,8 @@ const STORAGE_KEYS = {
   assetHoldings: 'smartwallet_asset_holdings',
   assetQuoteCache: 'smartwallet_asset_quote_cache',
   assetRecurringPlans: 'smartwallet_asset_recurring_plans',
+  assetPerformanceHistory: 'smartwallet_asset_performance_history',
+  assetTradeRecords: 'smartwallet_asset_trade_records',
   llmConfig: 'smartwallet_llm_config',
   autoBookkeepingSettings: 'smartwallet_auto_bookkeeping',
 } as const;
@@ -129,6 +134,8 @@ export const buildDefaultSnapshot = (): WalletSnapshot => ({
   assetHoldings: [],
   assetQuoteCache: [],
   assetRecurringPlans: [],
+  assetPerformanceHistory: [],
+  assetTradeRecords: [],
   llmConfig: defaultLlmConfig(),
   autoBookkeepingSettings: defaultAutoBookkeepingSettings(),
 });
@@ -188,6 +195,50 @@ const normalizeAssetRecurringPlans = (assetRecurringPlans?: AssetRecurringPlan[]
         }))
     : [];
 
+const normalizeAssetPerformanceHistory = (assetPerformanceHistory?: AssetPerformanceSnapshot[] | null) =>
+  Array.isArray(assetPerformanceHistory)
+    ? assetPerformanceHistory
+        .map((snapshot) => normalizeAssetPerformanceSnapshot(snapshot))
+        .filter((snapshot): snapshot is AssetPerformanceSnapshot => Boolean(snapshot))
+        .sort((left, right) => left.date.localeCompare(right.date))
+        .slice(-370)
+    : [];
+
+const normalizeAssetTradeRecords = (assetTradeRecords?: AssetTradeRecord[] | null) =>
+  Array.isArray(assetTradeRecords)
+    ? assetTradeRecords
+        .filter((record) => record && typeof record.holdingId === 'string' && record.holdingId)
+        .map((record) => {
+          const shares = typeof record.shares === 'number' && Number.isFinite(record.shares) ? Math.max(0, record.shares) : 0;
+          const amount = typeof record.amount === 'number' && Number.isFinite(record.amount) ? Math.max(0, record.amount) : 0;
+          return {
+            id: typeof record.id === 'string' && record.id ? record.id : `${record.holdingId}-${Date.now()}`,
+            holdingId: record.holdingId,
+            assetType: record.assetType === 'stock' ? 'stock' : 'fund',
+            code: typeof record.code === 'string' ? record.code : '',
+            name: typeof record.name === 'string' ? record.name : '',
+            tradeType:
+              record.tradeType === 'sell' || record.tradeType === 'recurring' || record.tradeType === 'buy'
+                ? record.tradeType
+                : 'buy',
+            source: record.source === 'recurring' ? 'recurring' : 'manual',
+            shares,
+            amount,
+            price:
+              typeof record.price === 'number' && Number.isFinite(record.price)
+                ? Math.max(0, record.price)
+                : shares > 0
+                  ? amount / shares
+                  : 0,
+            occurredAt:
+              typeof record.occurredAt === 'string' && record.occurredAt ? record.occurredAt : new Date().toISOString(),
+            createdAt:
+              typeof record.createdAt === 'string' && record.createdAt ? record.createdAt : new Date().toISOString(),
+          } satisfies AssetTradeRecord;
+        })
+        .sort((left, right) => new Date(right.occurredAt).getTime() - new Date(left.occurredAt).getTime())
+    : [];
+
 const normalizeAutoBookkeepingSettings = (
   autoBookkeepingSettings?: Partial<AutoBookkeepingSettings> | Record<string, unknown> | null,
 ): AutoBookkeepingSettings => {
@@ -234,6 +285,10 @@ export const loadWebSnapshot = (): WalletSnapshot => {
     assetHoldings: normalizeAssetHoldings(parseStoredValue<AssetHolding[]>(STORAGE_KEYS.assetHoldings, [])),
     assetQuoteCache: normalizeAssetQuotes(parseStoredValue<AssetQuote[]>(STORAGE_KEYS.assetQuoteCache, [])),
     assetRecurringPlans: normalizeAssetRecurringPlans(parseStoredValue<AssetRecurringPlan[]>(STORAGE_KEYS.assetRecurringPlans, [])),
+    assetPerformanceHistory: normalizeAssetPerformanceHistory(
+      parseStoredValue<AssetPerformanceSnapshot[]>(STORAGE_KEYS.assetPerformanceHistory, []),
+    ),
+    assetTradeRecords: normalizeAssetTradeRecords(parseStoredValue<AssetTradeRecord[]>(STORAGE_KEYS.assetTradeRecords, [])),
     llmConfig: normalizeLlmConfig(parseStoredValue<Partial<LLMConfig>>(STORAGE_KEYS.llmConfig, {})),
     autoBookkeepingSettings: normalizeAutoBookkeepingSettings(
       parseStoredValue<Record<string, unknown>>(STORAGE_KEYS.autoBookkeepingSettings, {}),
@@ -249,6 +304,8 @@ export const saveWebSnapshot = (snapshot: WalletSnapshot) => {
   localStorage.setItem(STORAGE_KEYS.assetHoldings, JSON.stringify(snapshot.assetHoldings));
   localStorage.setItem(STORAGE_KEYS.assetQuoteCache, JSON.stringify(snapshot.assetQuoteCache));
   localStorage.setItem(STORAGE_KEYS.assetRecurringPlans, JSON.stringify(snapshot.assetRecurringPlans));
+  localStorage.setItem(STORAGE_KEYS.assetPerformanceHistory, JSON.stringify(snapshot.assetPerformanceHistory));
+  localStorage.setItem(STORAGE_KEYS.assetTradeRecords, JSON.stringify(snapshot.assetTradeRecords));
   localStorage.setItem(STORAGE_KEYS.llmConfig, JSON.stringify(snapshot.llmConfig));
   localStorage.setItem(STORAGE_KEYS.autoBookkeepingSettings, JSON.stringify(snapshot.autoBookkeepingSettings));
 };
@@ -274,6 +331,10 @@ export const normalizeSnapshot = (snapshot?: Partial<WalletSnapshot> | null): Wa
     assetHoldings: normalizeAssetHoldings(snapshot?.assetHoldings ?? defaults.assetHoldings),
     assetQuoteCache: normalizeAssetQuotes(snapshot?.assetQuoteCache ?? defaults.assetQuoteCache),
     assetRecurringPlans: normalizeAssetRecurringPlans(snapshot?.assetRecurringPlans ?? defaults.assetRecurringPlans),
+    assetPerformanceHistory: normalizeAssetPerformanceHistory(
+      snapshot?.assetPerformanceHistory ?? defaults.assetPerformanceHistory,
+    ),
+    assetTradeRecords: normalizeAssetTradeRecords(snapshot?.assetTradeRecords ?? defaults.assetTradeRecords),
     llmConfig: normalizeLlmConfig(snapshot?.llmConfig ?? {}),
     autoBookkeepingSettings: normalizeAutoBookkeepingSettings(snapshot?.autoBookkeepingSettings ?? {}),
   };
@@ -325,8 +386,9 @@ export const syncWebAssetQuotes = async (assetHoldings: AssetHolding[]) => {
   const stocks = assetHoldings.filter((holding) => holding.assetType === 'stock');
   const funds = assetHoldings.filter((holding) => holding.assetType === 'fund');
 
-  if (stocks.length > 0) {
-    const query = stocks.map((holding) => `${holding.market}${holding.code}`).join(',');
+  if (stocks.length > 0 || assetHoldings.length > 0) {
+    const stockTargets = stocks.map((holding) => `${holding.market}${holding.code}`);
+    const query = [...stockTargets, 'sh000001'].join(',');
     const response = await fetch(`https://qt.gtimg.cn/q=${encodeURIComponent(query)}`);
     quotes.push(...parseTencentStockQuoteResponse(await response.text(), syncedAt));
   }

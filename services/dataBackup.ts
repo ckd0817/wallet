@@ -1,6 +1,6 @@
 import { mergeDefaultCategories } from '../constants';
 import { WalletBackupData, WalletBackupFile, WalletSnapshot } from '../types';
-import { normalizeAssetHolding } from './assetEngine';
+import { normalizeAssetHolding, normalizeAssetPerformanceSnapshot } from './assetEngine';
 
 const BACKUP_FORMAT = 'smartwallet-backup';
 const BACKUP_VERSION = 1;
@@ -27,6 +27,14 @@ const normalizeBackupData = (value: unknown): WalletBackupData => {
     assetRecurringPlans: Array.isArray(record.assetRecurringPlans)
       ? (record.assetRecurringPlans as WalletBackupData['assetRecurringPlans'])
       : [],
+    assetPerformanceHistory: Array.isArray(record.assetPerformanceHistory)
+      ? (record.assetPerformanceHistory as WalletBackupData['assetPerformanceHistory'])
+          .map((snapshot) => normalizeAssetPerformanceSnapshot(snapshot))
+          .filter((snapshot): snapshot is WalletBackupData['assetPerformanceHistory'][number] => Boolean(snapshot))
+      : [],
+    assetTradeRecords: Array.isArray(record.assetTradeRecords)
+      ? (record.assetTradeRecords as WalletBackupData['assetTradeRecords'])
+      : [],
   };
 };
 
@@ -46,8 +54,31 @@ const mergeById = <T extends { id: string }>(current: T[], imported: T[]) => {
   return Array.from(merged.values());
 };
 
+const mergeByDate = <T extends { date: string }>(current: T[], imported: T[]) => {
+  const merged = new Map<string, T>();
+
+  (current ?? []).forEach((item) => {
+    merged.set(item.date, item);
+  });
+
+  (imported ?? []).forEach((item) => {
+    merged.set(item.date, item);
+  });
+
+  return Array.from(merged.values()).sort((left, right) => left.date.localeCompare(right.date));
+};
+
 export const buildBackupPayload = (
-  snapshot: Pick<WalletSnapshot, 'transactions' | 'categories' | 'recurringProfiles' | 'assetHoldings' | 'assetRecurringPlans'>,
+  snapshot: Partial<Pick<
+    WalletSnapshot,
+    | 'transactions'
+    | 'categories'
+    | 'recurringProfiles'
+    | 'assetHoldings'
+    | 'assetRecurringPlans'
+    | 'assetPerformanceHistory'
+    | 'assetTradeRecords'
+  >>,
   exportedAt = new Date().toISOString(),
 ): WalletBackupFile => ({
   format: BACKUP_FORMAT,
@@ -81,20 +112,26 @@ export const parseBackupFile = (content: string): WalletBackupData => {
 };
 
 export const mergeBackupData = (
-  current: WalletBackupData,
-  imported: WalletBackupData,
+  current: Partial<WalletBackupData>,
+  imported: Partial<WalletBackupData>,
   mode: 'append' | 'overwrite',
 ): WalletBackupData => {
+  const normalizedCurrent = normalizeBackupData(current);
   const normalizedImported = normalizeBackupData(imported);
   if (mode === 'overwrite') {
     return normalizedImported;
   }
 
   return {
-    transactions: mergeById(current.transactions, normalizedImported.transactions),
-    categories: mergeDefaultCategories(mergeById(current.categories, normalizedImported.categories)),
-    recurringProfiles: mergeById(current.recurringProfiles, normalizedImported.recurringProfiles),
-    assetHoldings: mergeById(current.assetHoldings, normalizedImported.assetHoldings),
-    assetRecurringPlans: mergeById(current.assetRecurringPlans, normalizedImported.assetRecurringPlans),
+    transactions: mergeById(normalizedCurrent.transactions, normalizedImported.transactions),
+    categories: mergeDefaultCategories(mergeById(normalizedCurrent.categories, normalizedImported.categories)),
+    recurringProfiles: mergeById(normalizedCurrent.recurringProfiles, normalizedImported.recurringProfiles),
+    assetHoldings: mergeById(normalizedCurrent.assetHoldings, normalizedImported.assetHoldings),
+    assetRecurringPlans: mergeById(normalizedCurrent.assetRecurringPlans, normalizedImported.assetRecurringPlans),
+    assetPerformanceHistory: mergeByDate(
+      normalizedCurrent.assetPerformanceHistory,
+      normalizedImported.assetPerformanceHistory,
+    ),
+    assetTradeRecords: mergeById(normalizedCurrent.assetTradeRecords, normalizedImported.assetTradeRecords),
   };
 };

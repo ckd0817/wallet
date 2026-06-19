@@ -6,8 +6,10 @@ import {
   AppTab,
   AssetHolding,
   AssetImportCandidate,
+  AssetPerformanceSnapshot,
   AssetQuote,
   AssetRecurringPlan,
+  AssetTradeRecord,
   AutoBookkeepingSettings,
   CaptureAttemptLog,
   Category,
@@ -55,7 +57,12 @@ import {
   syncWebAssetQuotes,
 } from './services/walletStore';
 import { mergeBackupData } from './services/dataBackup';
-import { applyAssetRecurringPurchase } from './services/assetEngine';
+import {
+  applyAssetRecurringPurchaseWithQuote,
+  buildAssetPerformanceSnapshot,
+  buildAssetPositions,
+  mergeAssetPerformanceHistory,
+} from './services/assetEngine';
 
 const App: React.FC = () => {
   const runningInAndroid = isAndroidNative();
@@ -75,6 +82,8 @@ const App: React.FC = () => {
   const [assetHoldings, setAssetHoldings] = useState<AssetHolding[]>([]);
   const [assetQuoteCache, setAssetQuoteCache] = useState<AssetQuote[]>([]);
   const [assetRecurringPlans, setAssetRecurringPlans] = useState<AssetRecurringPlan[]>([]);
+  const [assetPerformanceHistory, setAssetPerformanceHistory] = useState<AssetPerformanceSnapshot[]>([]);
+  const [assetTradeRecords, setAssetTradeRecords] = useState<AssetTradeRecord[]>([]);
   const [llmConfig, setLlmConfig] = useState<LLMConfig>(buildDefaultSnapshot().llmConfig);
   const [autoBookkeepingSettings, setAutoBookkeepingSettings] = useState<AutoBookkeepingSettings>(defaultAutoBookkeepingSettings());
   const [isInitialized, setIsInitialized] = useState(false);
@@ -94,6 +103,8 @@ const App: React.FC = () => {
     setAssetHoldings(snapshot.assetHoldings);
     setAssetQuoteCache(snapshot.assetQuoteCache);
     setAssetRecurringPlans(snapshot.assetRecurringPlans);
+    setAssetPerformanceHistory(snapshot.assetPerformanceHistory);
+    setAssetTradeRecords(snapshot.assetTradeRecords);
     setLlmConfig(snapshot.llmConfig);
     setAutoBookkeepingSettings(snapshot.autoBookkeepingSettings);
   }, []);
@@ -161,10 +172,25 @@ const App: React.FC = () => {
         assetHoldings,
         assetQuoteCache,
         assetRecurringPlans,
+        assetPerformanceHistory,
+        assetTradeRecords,
         llmConfig,
         autoBookkeepingSettings,
       }),
-    [assetHoldings, assetQuoteCache, assetRecurringPlans, autoBookkeepingSettings, captureLogs, categories, llmConfig, recurringProfiles, snapshotMeta, transactions],
+    [
+      assetHoldings,
+      assetPerformanceHistory,
+      assetTradeRecords,
+      assetQuoteCache,
+      assetRecurringPlans,
+      autoBookkeepingSettings,
+      captureLogs,
+      categories,
+      llmConfig,
+      recurringProfiles,
+      snapshotMeta,
+      transactions,
+    ],
   );
 
   const refreshNativeSnapshot = useCallback(async () => {
@@ -187,6 +213,12 @@ const App: React.FC = () => {
         assetHoldings: webSnapshot.assetHoldings.length ? webSnapshot.assetHoldings : nativeSnapshot.assetHoldings,
         assetQuoteCache: webSnapshot.assetQuoteCache.length ? webSnapshot.assetQuoteCache : nativeSnapshot.assetQuoteCache,
         assetRecurringPlans: webSnapshot.assetRecurringPlans.length ? webSnapshot.assetRecurringPlans : nativeSnapshot.assetRecurringPlans,
+        assetPerformanceHistory: webSnapshot.assetPerformanceHistory.length
+          ? webSnapshot.assetPerformanceHistory
+          : nativeSnapshot.assetPerformanceHistory,
+        assetTradeRecords: webSnapshot.assetTradeRecords.length
+          ? webSnapshot.assetTradeRecords
+          : nativeSnapshot.assetTradeRecords,
         llmConfig: webSnapshot.llmConfig,
         migratedFromWebStorage: true,
         autoBookkeepingSettings: {
@@ -205,6 +237,7 @@ const App: React.FC = () => {
       const today = new Date().toISOString().split('T')[0];
       const holdings = snapshot.assetHoldings.map((holding) => ({ ...holding }));
       const plans = snapshot.assetRecurringPlans.map((plan) => ({ ...plan }));
+      const tradeRecords = snapshot.assetTradeRecords.map((record) => ({ ...record }));
       const quoteMap = new Map(snapshot.assetQuoteCache.map((quote) => [`${quote.assetType}:${quote.code}`, quote]));
       let hasUpdates = false;
 
@@ -218,26 +251,40 @@ const App: React.FC = () => {
           continue;
         }
 
-        while (plan.nextDueDate <= today) {
-          const currentHolding = holdings[holdingIndex];
-          const quotes = runningInAndroid
-            ? await syncNativeAssetQuotes([currentHolding])
-            : await syncWebAssetQuotes([currentHolding]);
-          const quote = quotes.find((item) => item.assetType === currentHolding.assetType && item.code === currentHolding.code);
-          if (!quote || quote.price <= 0) {
-            break;
-          }
-
-          quoteMap.set(`${quote.assetType}:${quote.code}`, quote);
-          const execution = applyAssetRecurringPurchase(currentHolding, plan, quote.price);
-          if (!execution) {
-            break;
-          }
-
-          holdings[holdingIndex] = execution.holding;
-          Object.assign(plan, execution.plan);
-          hasUpdates = true;
+        if (plan.nextDueDate > today) {
+          continue;
         }
+
+        const currentHolding = holdings[holdingIndex];
+        const quotes = runningInAndroid
+          ? await syncNativeAssetQuotes([currentHolding])
+          : await syncWebAssetQuotes([currentHolding]);
+        quotes.forEach((quote) => {
+          quoteMap.set(`${quote.assetType}:${quote.code}`, quote);
+        });
+        const quote = quotes.find((item) => item.assetType === currentHolding.assetType && item.code === currentHolding.code);
+        const execution = quote ? applyAssetRecurringPurchaseWithQuote(currentHolding, plan, quote, today) : null;
+        if (!execution) {
+          continue;
+        }
+
+        holdings[holdingIndex] = execution.holding;
+        Object.assign(plan, execution.plan);
+        tradeRecords.unshift({
+          id: uuidv4(),
+          holdingId: currentHolding.id,
+          assetType: currentHolding.assetType,
+          code: currentHolding.code,
+          name: quote.name || currentHolding.name,
+          tradeType: 'recurring',
+          source: 'recurring',
+          shares: execution.addedShares,
+          amount: plan.amount,
+          price: quote.price,
+          occurredAt: `${execution.executionDate ?? today}T00:00:00.000Z`,
+          createdAt: new Date().toISOString(),
+        });
+        hasUpdates = true;
       }
 
       if (!hasUpdates) {
@@ -249,6 +296,7 @@ const App: React.FC = () => {
           ...snapshot,
           assetHoldings: holdings,
           assetRecurringPlans: plans,
+          assetTradeRecords: tradeRecords,
           assetQuoteCache: Array.from(quoteMap.values()),
         }),
         hasUpdates,
@@ -586,6 +634,8 @@ const App: React.FC = () => {
         recurringProfiles,
         assetHoldings,
         assetRecurringPlans,
+        assetPerformanceHistory,
+        assetTradeRecords,
       },
       importedData,
       mode,
@@ -598,6 +648,8 @@ const App: React.FC = () => {
       recurringProfiles: mergedData.recurringProfiles,
       assetHoldings: mergedData.assetHoldings,
       assetRecurringPlans: mergedData.assetRecurringPlans,
+      assetPerformanceHistory: mergedData.assetPerformanceHistory,
+      assetTradeRecords: mergedData.assetTradeRecords,
     });
 
     if (runningInAndroid) {
@@ -662,9 +714,35 @@ const App: React.FC = () => {
         quotes.forEach((quote) => {
           quoteMap.set(`${quote.assetType}:${quote.code}`, quote);
         });
+        const quoteNameMap = new Map(
+          quotes.filter((quote) => quote.name.trim()).map((quote) => [`${quote.assetType}:${quote.code}`, quote]),
+        );
+        const assetHoldingsWithNames = baseSnapshot.assetHoldings.map((holding) => {
+          const quote = quoteNameMap.get(`${holding.assetType}:${holding.code}`);
+          const quoteName = quote?.name.trim();
+          if (!quoteName || holding.name === quoteName) {
+            return holding;
+          }
+          return {
+            ...holding,
+            name: quoteName,
+            updatedAt: quote.syncedAt || new Date().toISOString(),
+          };
+        });
+        const updatedQuoteCache = Array.from(quoteMap.values());
+        const benchmarkQuote = updatedQuoteCache.find((quote) => quote.assetType === 'index' && quote.code === '000001');
+        const nextPerformanceSnapshot = buildAssetPerformanceSnapshot(
+          buildAssetPositions(assetHoldingsWithNames, updatedQuoteCache),
+          benchmarkQuote,
+        );
         const nextSnapshot = normalizeSnapshot({
           ...baseSnapshot,
-          assetQuoteCache: Array.from(quoteMap.values()),
+          assetHoldings: assetHoldingsWithNames,
+          assetQuoteCache: updatedQuoteCache,
+          assetPerformanceHistory: mergeAssetPerformanceHistory(
+            baseSnapshot.assetPerformanceHistory,
+            nextPerformanceSnapshot,
+          ),
         });
 
         if (runningInAndroid) {
@@ -707,7 +785,11 @@ const App: React.FC = () => {
     void syncAssetQuotesForSnapshot(nextSnapshot.assetHoldings, nextSnapshot);
   };
 
-  const handleUpdateAssetHolding = async (id: string, data: Omit<AssetHolding, 'id' | 'createdAt' | 'updatedAt'>) => {
+  const handleUpdateAssetHolding = async (
+    id: string,
+    data: Omit<AssetHolding, 'id' | 'createdAt' | 'updatedAt'>,
+    tradeRecord?: Omit<AssetTradeRecord, 'id' | 'createdAt'>,
+  ) => {
     const original = assetHoldings.find((holding) => holding.id === id);
     if (!original) {
       return;
@@ -718,8 +800,26 @@ const App: React.FC = () => {
       ...data,
       updatedAt: new Date().toISOString(),
     };
+    const nextTradeRecord: AssetTradeRecord | null = tradeRecord
+      ? {
+          id: uuidv4(),
+          createdAt: new Date().toISOString(),
+          ...tradeRecord,
+        }
+      : null;
 
     if (runningInAndroid) {
+      if (nextTradeRecord) {
+        const nextSnapshot = normalizeSnapshot({
+          ...buildCurrentSnapshot(),
+          assetHoldings: assetHoldings.map((holding) => (holding.id === id ? assetHolding : holding)),
+          assetTradeRecords: [nextTradeRecord, ...assetTradeRecords],
+        });
+        applySnapshot(await saveNativeSnapshot(nextSnapshot));
+        void syncAssetQuotesForSnapshot(nextSnapshot.assetHoldings, nextSnapshot);
+        return;
+      }
+
       const nextSnapshot = await saveNativeAssetHolding(assetHolding);
       applySnapshot(nextSnapshot);
       void syncAssetQuotesForSnapshot(nextSnapshot.assetHoldings, nextSnapshot);
@@ -729,6 +829,7 @@ const App: React.FC = () => {
     const nextSnapshot = normalizeSnapshot({
       ...buildCurrentSnapshot(),
       assetHoldings: assetHoldings.map((holding) => (holding.id === id ? assetHolding : holding)),
+      assetTradeRecords: nextTradeRecord ? [nextTradeRecord, ...assetTradeRecords] : assetTradeRecords,
     });
     applySnapshot(nextSnapshot);
     void syncAssetQuotesForSnapshot(nextSnapshot.assetHoldings, nextSnapshot);
@@ -828,6 +929,8 @@ const App: React.FC = () => {
             assetHoldings={assetHoldings}
             assetQuoteCache={assetQuoteCache}
             assetRecurringPlans={assetRecurringPlans}
+            assetPerformanceHistory={assetPerformanceHistory}
+            assetTradeRecords={assetTradeRecords}
             isSyncingAssets={isSyncingAssets}
             assetSyncMessage={assetSyncMessage}
             onAddAssetHolding={handleAddAssetHolding}
@@ -847,6 +950,8 @@ const App: React.FC = () => {
             recurringProfiles={recurringProfiles}
             assetHoldings={assetHoldings}
             assetRecurringPlans={assetRecurringPlans}
+            assetPerformanceHistory={assetPerformanceHistory}
+            assetTradeRecords={assetTradeRecords}
             llmConfig={llmConfig}
             autoBookkeepingSettings={autoBookkeepingSettings}
             captureLogs={captureLogs}
