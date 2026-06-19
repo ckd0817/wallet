@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { buildDefaultSnapshot } from './walletStore';
 import { buildBackupPayload, mergeBackupData, parseBackupFile } from './dataBackup';
-import { Category, Transaction, WalletSnapshot } from '../types';
+import { AssetHolding, Category, Transaction, WalletSnapshot } from '../types';
 
 describe('dataBackup', () => {
   it('keeps capture logs out of JSON backups', () => {
@@ -118,5 +118,31 @@ describe('dataBackup', () => {
     expect(merged.transactions.filter((transaction) => transaction.id === duplicateTransaction.id)).toHaveLength(1);
     expect(merged.categories.some((category) => category.id === existingCategory.id)).toBe(true);
     expect(merged.categories.some((category) => category.id === importedCategory.id)).toBe(true);
+  });
+
+  it('exports and parses asset holdings', () => {
+    const holding: AssetHolding = {
+      id: 'asset-1',
+      assetType: 'fund',
+      code: '000001',
+      market: 'fund',
+      name: '华夏成长混合',
+      shares: 1200,
+      costAmount: 1800,
+      createdAt: '2026-06-18T08:00:00.000Z',
+      updatedAt: '2026-06-18T08:00:00.000Z',
+    };
+
+    const payload = buildBackupPayload({
+      ...buildDefaultSnapshot(),
+      assetHoldings: [holding],
+    });
+    const parsed = parseBackupFile(JSON.stringify(payload));
+
+    expect(parsed.assetHoldings[0]).toMatchObject({
+      id: holding.id,
+      code: holding.code,
+      shares: holding.shares,
+    });
   });
 });

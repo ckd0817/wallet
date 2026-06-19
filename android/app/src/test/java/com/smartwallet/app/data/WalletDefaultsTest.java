@@ -29,6 +29,9 @@ public class WalletDefaultsTest {
 
         assertTrue(store.has("transactions"));
         assertTrue(store.has("llmConfig"));
+        assertTrue(store.has("assetHoldings"));
+        assertTrue(store.has("assetQuoteCache"));
+        assertTrue(store.has("assetRecurringPlans"));
         assertTrue(bookkeepingSettings != null);
         assertTrue(llmConfig != null);
         assertFalse(llmConfig.has("enabled"));

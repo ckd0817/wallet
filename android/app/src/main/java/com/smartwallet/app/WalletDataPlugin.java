@@ -7,6 +7,9 @@ import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import com.smartwallet.app.data.WalletRepository;
+import com.smartwallet.app.assets.AssetQuoteClient;
+import com.smartwallet.app.assets.AssetScreenshotAnalysisClient;
+import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -92,6 +95,70 @@ public class WalletDataPlugin extends Plugin {
             return;
         }
         call.resolve(toJsObject(repository().saveLlmConfig(llmConfig)));
+    }
+
+    @PluginMethod
+    public void upsertAssetHolding(PluginCall call) {
+        JSObject assetHolding = call.getObject("assetHolding");
+        if (assetHolding == null) {
+            call.reject("assetHolding is required");
+            return;
+        }
+        call.resolve(toJsObject(repository().upsertAssetHolding(assetHolding)));
+    }
+
+    @PluginMethod
+    public void deleteAssetHolding(PluginCall call) {
+        String id = call.getString("id");
+        if (id == null || id.isEmpty()) {
+            call.reject("id is required");
+            return;
+        }
+        call.resolve(toJsObject(repository().deleteAssetHolding(id)));
+    }
+
+    @PluginMethod
+    public void syncAssetQuotes(PluginCall call) {
+        JSArray assetHoldings = call.getArray("assetHoldings");
+        JSONArray quotes = new AssetQuoteClient().sync(assetHoldings == null ? new JSArray() : assetHoldings);
+        repository().replaceAssetQuoteCache(quotes);
+        JSObject result = new JSObject();
+        result.put("quotes", quotes);
+        call.resolve(result);
+    }
+
+    @PluginMethod
+    public void analyzeAssetScreenshot(PluginCall call) {
+        String imageBase64 = call.getString("imageBase64");
+        if (imageBase64 == null || imageBase64.isEmpty()) {
+            call.reject("imageBase64 is required");
+            return;
+        }
+        JSONObject result = new AssetScreenshotAnalysisClient().analyze(
+            imageBase64,
+            repository().getLlmConfig()
+        );
+        call.resolve(toJsObject(result));
+    }
+
+    @PluginMethod
+    public void upsertAssetRecurringPlan(PluginCall call) {
+        JSObject assetRecurringPlan = call.getObject("assetRecurringPlan");
+        if (assetRecurringPlan == null) {
+            call.reject("assetRecurringPlan is required");
+            return;
+        }
+        call.resolve(toJsObject(repository().upsertAssetRecurringPlan(assetRecurringPlan)));
+    }
+
+    @PluginMethod
+    public void deleteAssetRecurringPlan(PluginCall call) {
+        String id = call.getString("id");
+        if (id == null || id.isEmpty()) {
+            call.reject("id is required");
+            return;
+        }
+        call.resolve(toJsObject(repository().deleteAssetRecurringPlan(id)));
     }
 
     private WalletRepository repository() {

@@ -127,6 +127,60 @@ public class WalletRepository {
         }
     }
 
+    public JSONObject upsertAssetHolding(JSONObject assetHolding) {
+        synchronized (lock) {
+            JSONObject store = readStoreLocked();
+            safePut(store, "assetHoldings", upsertById(store.optJSONArray("assetHoldings"), normalizeAssetHolding(assetHolding), true));
+            writeStoreLocked(store);
+            return cloneObject(store);
+        }
+    }
+
+    public JSONObject deleteAssetHolding(String id) {
+        synchronized (lock) {
+            JSONObject store = readStoreLocked();
+            JSONObject deleted = findById(store.optJSONArray("assetHoldings"), id);
+            safePut(store, "assetHoldings", removeById(store.optJSONArray("assetHoldings"), id));
+            if (deleted != null) {
+                safePut(
+                    store,
+                    "assetQuoteCache",
+                    removeAssetQuote(store.optJSONArray("assetQuoteCache"), deleted.optString("assetType", ""), deleted.optString("code", ""))
+                );
+                safePut(store, "assetRecurringPlans", removeAssetRecurringPlansByHoldingId(store.optJSONArray("assetRecurringPlans"), id));
+            }
+            writeStoreLocked(store);
+            return cloneObject(store);
+        }
+    }
+
+    public JSONObject replaceAssetQuoteCache(JSONArray assetQuotes) {
+        synchronized (lock) {
+            JSONObject store = readStoreLocked();
+            safePut(store, "assetQuoteCache", cloneArray(assetQuotes));
+            writeStoreLocked(store);
+            return cloneObject(store);
+        }
+    }
+
+    public JSONObject upsertAssetRecurringPlan(JSONObject assetRecurringPlan) {
+        synchronized (lock) {
+            JSONObject store = readStoreLocked();
+            safePut(store, "assetRecurringPlans", upsertById(store.optJSONArray("assetRecurringPlans"), normalizeAssetRecurringPlan(assetRecurringPlan), true));
+            writeStoreLocked(store);
+            return cloneObject(store);
+        }
+    }
+
+    public JSONObject deleteAssetRecurringPlan(String id) {
+        synchronized (lock) {
+            JSONObject store = readStoreLocked();
+            safePut(store, "assetRecurringPlans", removeById(store.optJSONArray("assetRecurringPlans"), id));
+            writeStoreLocked(store);
+            return cloneObject(store);
+        }
+    }
+
     public JSONObject upsertCaptureLog(JSONObject captureLog) {
         synchronized (lock) {
             JSONObject store = readStoreLocked();
@@ -183,6 +237,18 @@ public class WalletRepository {
         }
     }
 
+    public JSONArray getAssetHoldings() {
+        synchronized (lock) {
+            return cloneArray(readStoreLocked().optJSONArray("assetHoldings"));
+        }
+    }
+
+    public JSONArray getAssetRecurringPlans() {
+        synchronized (lock) {
+            return cloneArray(readStoreLocked().optJSONArray("assetRecurringPlans"));
+        }
+    }
+
     public JSONObject getCaptureLogById(String id) {
         synchronized (lock) {
             JSONArray captureLogs = readStoreLocked().optJSONArray("captureLogs");
@@ -233,6 +299,39 @@ public class WalletRepository {
         return normalized;
     }
 
+    private JSONObject normalizeAssetHolding(JSONObject assetHolding) {
+        JSONObject normalized = cloneObject(assetHolding);
+        String now = nowIsoString();
+        try {
+            if (!normalized.has("id") || normalized.optString("id").isEmpty()) {
+                normalized.put("id", UUID.randomUUID().toString());
+            }
+            if (!normalized.has("createdAt")) {
+                normalized.put("createdAt", now);
+            }
+            normalized.put("updatedAt", now);
+        } catch (JSONException ignored) {}
+        return normalized;
+    }
+
+    private JSONObject normalizeAssetRecurringPlan(JSONObject assetRecurringPlan) {
+        JSONObject normalized = cloneObject(assetRecurringPlan);
+        String now = nowIsoString();
+        try {
+            if (!normalized.has("id") || normalized.optString("id").isEmpty()) {
+                normalized.put("id", UUID.randomUUID().toString());
+            }
+            if (!normalized.has("createdAt")) {
+                normalized.put("createdAt", now);
+            }
+            normalized.put("updatedAt", now);
+            if (!normalized.has("enabled")) {
+                normalized.put("enabled", true);
+            }
+        } catch (JSONException ignored) {}
+        return normalized;
+    }
+
     private JSONArray upsertById(JSONArray existing, JSONObject object, boolean insertAtStart) {
         JSONArray source = cloneArray(existing);
         JSONArray updated = new JSONArray();
@@ -271,6 +370,46 @@ public class WalletRepository {
         for (int index = 0; index < source.length(); index++) {
             JSONObject current = source.optJSONObject(index);
             if (current == null || id.equals(current.optString("id"))) {
+                continue;
+            }
+            updated.put(current);
+        }
+        return updated;
+    }
+
+    private JSONObject findById(JSONArray existing, String id) {
+        JSONArray source = cloneArray(existing);
+        for (int index = 0; index < source.length(); index++) {
+            JSONObject current = source.optJSONObject(index);
+            if (current != null && id.equals(current.optString("id"))) {
+                return current;
+            }
+        }
+        return null;
+    }
+
+    private JSONArray removeAssetQuote(JSONArray existing, String assetType, String code) {
+        JSONArray source = cloneArray(existing);
+        JSONArray updated = new JSONArray();
+        for (int index = 0; index < source.length(); index++) {
+            JSONObject current = source.optJSONObject(index);
+            if (current == null) {
+                continue;
+            }
+            if (assetType.equals(current.optString("assetType", "")) && code.equals(current.optString("code", ""))) {
+                continue;
+            }
+            updated.put(current);
+        }
+        return updated;
+    }
+
+    private JSONArray removeAssetRecurringPlansByHoldingId(JSONArray existing, String holdingId) {
+        JSONArray source = cloneArray(existing);
+        JSONArray updated = new JSONArray();
+        for (int index = 0; index < source.length(); index++) {
+            JSONObject current = source.optJSONObject(index);
+            if (current == null || holdingId.equals(current.optString("holdingId", ""))) {
                 continue;
             }
             updated.put(current);

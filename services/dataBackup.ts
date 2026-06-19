@@ -1,5 +1,6 @@
 import { mergeDefaultCategories } from '../constants';
 import { WalletBackupData, WalletBackupFile, WalletSnapshot } from '../types';
+import { normalizeAssetHolding } from './assetEngine';
 
 const BACKUP_FORMAT = 'smartwallet-backup';
 const BACKUP_VERSION = 1;
@@ -18,17 +19,25 @@ const normalizeBackupData = (value: unknown): WalletBackupData => {
     recurringProfiles: Array.isArray(record.recurringProfiles)
       ? (record.recurringProfiles as WalletBackupData['recurringProfiles'])
       : [],
+    assetHoldings: Array.isArray(record.assetHoldings)
+      ? (record.assetHoldings as WalletBackupData['assetHoldings'])
+          .map((holding) => normalizeAssetHolding(holding))
+          .filter((holding): holding is WalletBackupData['assetHoldings'][number] => Boolean(holding))
+      : [],
+    assetRecurringPlans: Array.isArray(record.assetRecurringPlans)
+      ? (record.assetRecurringPlans as WalletBackupData['assetRecurringPlans'])
+      : [],
   };
 };
 
 const mergeById = <T extends { id: string }>(current: T[], imported: T[]) => {
   const merged = new Map<string, T>();
 
-  current.forEach((item) => {
+  (current ?? []).forEach((item) => {
     merged.set(item.id, item);
   });
 
-  imported.forEach((item) => {
+  (imported ?? []).forEach((item) => {
     if (!merged.has(item.id)) {
       merged.set(item.id, item);
     }
@@ -38,7 +47,7 @@ const mergeById = <T extends { id: string }>(current: T[], imported: T[]) => {
 };
 
 export const buildBackupPayload = (
-  snapshot: Pick<WalletSnapshot, 'transactions' | 'categories' | 'recurringProfiles'>,
+  snapshot: Pick<WalletSnapshot, 'transactions' | 'categories' | 'recurringProfiles' | 'assetHoldings' | 'assetRecurringPlans'>,
   exportedAt = new Date().toISOString(),
 ): WalletBackupFile => ({
   format: BACKUP_FORMAT,
@@ -85,5 +94,7 @@ export const mergeBackupData = (
     transactions: mergeById(current.transactions, normalizedImported.transactions),
     categories: mergeDefaultCategories(mergeById(current.categories, normalizedImported.categories)),
     recurringProfiles: mergeById(current.recurringProfiles, normalizedImported.recurringProfiles),
+    assetHoldings: mergeById(current.assetHoldings, normalizedImported.assetHoldings),
+    assetRecurringPlans: mergeById(current.assetRecurringPlans, normalizedImported.assetRecurringPlans),
   };
 };

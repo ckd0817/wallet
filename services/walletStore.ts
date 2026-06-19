@@ -3,6 +3,10 @@ import { Capacitor, PluginListenerHandle, registerPlugin } from '@capacitor/core
 import { DEFAULT_CATEGORIES, mergeDefaultCategories } from '../constants';
 import {
   AutoBookkeepingSettings,
+  AssetHolding,
+  AssetQuote,
+  AssetRecurringPlan,
+  AssetScreenshotAnalysisResult,
   CaptureAttemptLog,
   Category,
   LLMConfig,
@@ -11,6 +15,12 @@ import {
   Transaction,
   WalletSnapshot,
 } from '../types';
+import {
+  normalizeAssetHolding,
+  normalizeAssetQuote,
+  parseFundQuoteResponse,
+  parseTencentStockQuoteResponse,
+} from './assetEngine';
 import { normalizeCategoryState } from './categoryState';
 
 const STORAGE_KEYS = {
@@ -18,6 +28,9 @@ const STORAGE_KEYS = {
   captureLogs: 'smartwallet_capture_logs',
   categories: 'smartwallet_categories',
   recurringProfiles: 'smartwallet_recurring',
+  assetHoldings: 'smartwallet_asset_holdings',
+  assetQuoteCache: 'smartwallet_asset_quote_cache',
+  assetRecurringPlans: 'smartwallet_asset_recurring_plans',
   llmConfig: 'smartwallet_llm_config',
   autoBookkeepingSettings: 'smartwallet_auto_bookkeeping',
 } as const;
@@ -32,6 +45,10 @@ interface WalletDataPlugin {
   upsertRecurringProfile(options: { recurringProfile: RecurringProfile }): Promise<WalletSnapshot>;
   deleteRecurringProfile(options: { id: string }): Promise<WalletSnapshot>;
   saveLlmConfig(options: { llmConfig: LLMConfig }): Promise<WalletSnapshot>;
+  upsertAssetHolding(options: { assetHolding: AssetHolding }): Promise<WalletSnapshot>;
+  deleteAssetHolding(options: { id: string }): Promise<WalletSnapshot>;
+  syncAssetQuotes(options: { assetHoldings: AssetHolding[] }): Promise<{ quotes: AssetQuote[] }>;
+  analyzeAssetScreenshot(options: { imageBase64: string }): Promise<AssetScreenshotAnalysisResult>;
 }
 
 interface ScreenCaptureBookkeepingPlugin {
@@ -109,6 +126,9 @@ export const buildDefaultSnapshot = (): WalletSnapshot => ({
   captureLogs: [],
   categories: DEFAULT_CATEGORIES,
   recurringProfiles: [],
+  assetHoldings: [],
+  assetQuoteCache: [],
+  assetRecurringPlans: [],
   llmConfig: defaultLlmConfig(),
   autoBookkeepingSettings: defaultAutoBookkeepingSettings(),
 });
@@ -139,6 +159,33 @@ const normalizeCaptureLogs = (captureLogs?: CaptureAttemptLog[] | null) =>
     ? [...captureLogs].sort(
         (left, right) => new Date(right.capturedAt).getTime() - new Date(left.capturedAt).getTime(),
       )
+    : [];
+
+const normalizeAssetHoldings = (assetHoldings?: AssetHolding[] | null) =>
+  Array.isArray(assetHoldings)
+    ? assetHoldings.map((holding) => normalizeAssetHolding(holding)).filter((holding): holding is AssetHolding => Boolean(holding))
+    : [];
+
+const normalizeAssetQuotes = (assetQuotes?: AssetQuote[] | null) =>
+  Array.isArray(assetQuotes)
+    ? assetQuotes.map((quote) => normalizeAssetQuote(quote)).filter((quote): quote is AssetQuote => Boolean(quote))
+    : [];
+
+const normalizeAssetRecurringPlans = (assetRecurringPlans?: AssetRecurringPlan[] | null) =>
+  Array.isArray(assetRecurringPlans)
+    ? assetRecurringPlans
+        .filter((plan) => plan && typeof plan.holdingId === 'string' && plan.holdingId)
+        .map((plan) => ({
+          id: typeof plan.id === 'string' && plan.id ? plan.id : `${plan.holdingId}-${Date.now()}`,
+          holdingId: plan.holdingId,
+          amount: typeof plan.amount === 'number' && Number.isFinite(plan.amount) ? Math.max(0, plan.amount) : 0,
+          frequency: plan.frequency === 'daily' || plan.frequency === 'weekly' || plan.frequency === 'monthly' ? plan.frequency : 'monthly',
+          startDate: typeof plan.startDate === 'string' && plan.startDate ? plan.startDate : new Date().toISOString().split('T')[0],
+          nextDueDate: typeof plan.nextDueDate === 'string' && plan.nextDueDate ? plan.nextDueDate : new Date().toISOString().split('T')[0],
+          enabled: typeof plan.enabled === 'boolean' ? plan.enabled : true,
+          createdAt: typeof plan.createdAt === 'string' && plan.createdAt ? plan.createdAt : new Date().toISOString(),
+          updatedAt: typeof plan.updatedAt === 'string' && plan.updatedAt ? plan.updatedAt : new Date().toISOString(),
+        }))
     : [];
 
 const normalizeAutoBookkeepingSettings = (
@@ -184,6 +231,9 @@ export const loadWebSnapshot = (): WalletSnapshot => {
     captureLogs: normalizeCaptureLogs(parseStoredValue<CaptureAttemptLog[]>(STORAGE_KEYS.captureLogs, [])),
     categories: mergeDefaultCategories(storedCategories),
     recurringProfiles: parseStoredValue<RecurringProfile[]>(STORAGE_KEYS.recurringProfiles, []),
+    assetHoldings: normalizeAssetHoldings(parseStoredValue<AssetHolding[]>(STORAGE_KEYS.assetHoldings, [])),
+    assetQuoteCache: normalizeAssetQuotes(parseStoredValue<AssetQuote[]>(STORAGE_KEYS.assetQuoteCache, [])),
+    assetRecurringPlans: normalizeAssetRecurringPlans(parseStoredValue<AssetRecurringPlan[]>(STORAGE_KEYS.assetRecurringPlans, [])),
     llmConfig: normalizeLlmConfig(parseStoredValue<Partial<LLMConfig>>(STORAGE_KEYS.llmConfig, {})),
     autoBookkeepingSettings: normalizeAutoBookkeepingSettings(
       parseStoredValue<Record<string, unknown>>(STORAGE_KEYS.autoBookkeepingSettings, {}),
@@ -196,6 +246,9 @@ export const saveWebSnapshot = (snapshot: WalletSnapshot) => {
   localStorage.setItem(STORAGE_KEYS.captureLogs, JSON.stringify(snapshot.captureLogs));
   localStorage.setItem(STORAGE_KEYS.categories, JSON.stringify(snapshot.categories));
   localStorage.setItem(STORAGE_KEYS.recurringProfiles, JSON.stringify(snapshot.recurringProfiles));
+  localStorage.setItem(STORAGE_KEYS.assetHoldings, JSON.stringify(snapshot.assetHoldings));
+  localStorage.setItem(STORAGE_KEYS.assetQuoteCache, JSON.stringify(snapshot.assetQuoteCache));
+  localStorage.setItem(STORAGE_KEYS.assetRecurringPlans, JSON.stringify(snapshot.assetRecurringPlans));
   localStorage.setItem(STORAGE_KEYS.llmConfig, JSON.stringify(snapshot.llmConfig));
   localStorage.setItem(STORAGE_KEYS.autoBookkeepingSettings, JSON.stringify(snapshot.autoBookkeepingSettings));
 };
@@ -218,6 +271,9 @@ export const normalizeSnapshot = (snapshot?: Partial<WalletSnapshot> | null): Wa
     captureLogs: normalizeCaptureLogs(snapshot?.captureLogs ?? defaults.captureLogs),
     categories: normalizedCategoryState.categories,
     recurringProfiles: normalizedCategoryState.recurringProfiles,
+    assetHoldings: normalizeAssetHoldings(snapshot?.assetHoldings ?? defaults.assetHoldings),
+    assetQuoteCache: normalizeAssetQuotes(snapshot?.assetQuoteCache ?? defaults.assetQuoteCache),
+    assetRecurringPlans: normalizeAssetRecurringPlans(snapshot?.assetRecurringPlans ?? defaults.assetRecurringPlans),
     llmConfig: normalizeLlmConfig(snapshot?.llmConfig ?? {}),
     autoBookkeepingSettings: normalizeAutoBookkeepingSettings(snapshot?.autoBookkeepingSettings ?? {}),
   };
@@ -248,6 +304,43 @@ export const saveNativeCategory = async (category: Category) =>
 
 export const saveNativeLlmConfig = async (llmConfig: LLMConfig) =>
   normalizeSnapshot(await WalletData.saveLlmConfig({ llmConfig }));
+
+export const saveNativeAssetHolding = async (assetHolding: AssetHolding) =>
+  normalizeSnapshot(await WalletData.upsertAssetHolding({ assetHolding }));
+
+export const deleteNativeAssetHolding = async (id: string) =>
+  normalizeSnapshot(await WalletData.deleteAssetHolding({ id }));
+
+export const syncNativeAssetQuotes = async (assetHoldings: AssetHolding[]) => {
+  const result = await WalletData.syncAssetQuotes({ assetHoldings });
+  return normalizeAssetQuotes(result.quotes);
+};
+
+export const analyzeNativeAssetScreenshot = async (imageBase64: string): Promise<AssetScreenshotAnalysisResult> =>
+  WalletData.analyzeAssetScreenshot({ imageBase64 });
+
+export const syncWebAssetQuotes = async (assetHoldings: AssetHolding[]) => {
+  const syncedAt = new Date().toISOString();
+  const quotes: AssetQuote[] = [];
+  const stocks = assetHoldings.filter((holding) => holding.assetType === 'stock');
+  const funds = assetHoldings.filter((holding) => holding.assetType === 'fund');
+
+  if (stocks.length > 0) {
+    const query = stocks.map((holding) => `${holding.market}${holding.code}`).join(',');
+    const response = await fetch(`https://qt.gtimg.cn/q=${encodeURIComponent(query)}`);
+    quotes.push(...parseTencentStockQuoteResponse(await response.text(), syncedAt));
+  }
+
+  for (const holding of funds) {
+    const response = await fetch(`https://fundgz.1234567.com.cn/js/${holding.code}.js?rt=${Date.now()}`);
+    const quote = parseFundQuoteResponse(await response.text(), syncedAt);
+    if (quote) {
+      quotes.push(quote);
+    }
+  }
+
+  return normalizeAssetQuotes(quotes);
+};
 
 export const getNativeAutoBookkeepingStatus = async () => {
   if (!isAndroidNative()) {

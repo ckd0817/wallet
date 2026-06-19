@@ -21,6 +21,8 @@ import { Directory, Encoding, Filesystem } from '@capacitor/filesystem';
 
 import {
   AutoBookkeepingSettings,
+  AssetHolding,
+  AssetRecurringPlan,
   CaptureAttemptLog,
   Category,
   LLMConfig,
@@ -37,6 +39,8 @@ interface SettingsProps {
   transactions: Transaction[];
   categories: Category[];
   recurringProfiles: RecurringProfile[];
+  assetHoldings: AssetHolding[];
+  assetRecurringPlans: AssetRecurringPlan[];
   llmConfig: LLMConfig;
   autoBookkeepingSettings: AutoBookkeepingSettings;
   captureLogs: CaptureAttemptLog[];
@@ -53,6 +57,8 @@ const Settings: React.FC<SettingsProps> = ({
   transactions,
   categories,
   recurringProfiles,
+  assetHoldings,
+  assetRecurringPlans,
   llmConfig,
   autoBookkeepingSettings,
   captureLogs,
@@ -162,6 +168,8 @@ const Settings: React.FC<SettingsProps> = ({
         transactions,
         categories,
         recurringProfiles,
+        assetHoldings,
+        assetRecurringPlans,
       }),
       null,
       2,

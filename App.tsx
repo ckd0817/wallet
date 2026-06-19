@@ -4,6 +4,10 @@ import { v4 as uuidv4 } from 'uuid';
 
 import {
   AppTab,
+  AssetHolding,
+  AssetImportCandidate,
+  AssetQuote,
+  AssetRecurringPlan,
   AutoBookkeepingSettings,
   CaptureAttemptLog,
   Category,
@@ -44,8 +48,14 @@ import {
   saveWebSnapshot,
   testNativeModelConfig,
   retryNativeCaptureLog,
+  analyzeNativeAssetScreenshot,
+  deleteNativeAssetHolding,
+  saveNativeAssetHolding,
+  syncNativeAssetQuotes,
+  syncWebAssetQuotes,
 } from './services/walletStore';
 import { mergeBackupData } from './services/dataBackup';
+import { applyAssetRecurringPurchase } from './services/assetEngine';
 
 const App: React.FC = () => {
   const runningInAndroid = isAndroidNative();
@@ -62,9 +72,14 @@ const App: React.FC = () => {
   const [captureLogs, setCaptureLogs] = useState<CaptureAttemptLog[]>([]);
   const [categories, setCategories] = useState<Category[]>(buildDefaultSnapshot().categories);
   const [recurringProfiles, setRecurringProfiles] = useState<RecurringProfile[]>([]);
+  const [assetHoldings, setAssetHoldings] = useState<AssetHolding[]>([]);
+  const [assetQuoteCache, setAssetQuoteCache] = useState<AssetQuote[]>([]);
+  const [assetRecurringPlans, setAssetRecurringPlans] = useState<AssetRecurringPlan[]>([]);
   const [llmConfig, setLlmConfig] = useState<LLMConfig>(buildDefaultSnapshot().llmConfig);
   const [autoBookkeepingSettings, setAutoBookkeepingSettings] = useState<AutoBookkeepingSettings>(defaultAutoBookkeepingSettings());
   const [isInitialized, setIsInitialized] = useState(false);
+  const [isSyncingAssets, setIsSyncingAssets] = useState(false);
+  const [assetSyncMessage, setAssetSyncMessage] = useState('');
   const isHydratingRef = useRef(false);
 
   const applySnapshot = useCallback((snapshot: WalletSnapshot) => {
@@ -76,6 +91,9 @@ const App: React.FC = () => {
     setCaptureLogs(snapshot.captureLogs);
     setCategories(snapshot.categories);
     setRecurringProfiles(snapshot.recurringProfiles);
+    setAssetHoldings(snapshot.assetHoldings);
+    setAssetQuoteCache(snapshot.assetQuoteCache);
+    setAssetRecurringPlans(snapshot.assetRecurringPlans);
     setLlmConfig(snapshot.llmConfig);
     setAutoBookkeepingSettings(snapshot.autoBookkeepingSettings);
   }, []);
@@ -140,10 +158,13 @@ const App: React.FC = () => {
         captureLogs,
         categories,
         recurringProfiles,
+        assetHoldings,
+        assetQuoteCache,
+        assetRecurringPlans,
         llmConfig,
         autoBookkeepingSettings,
       }),
-    [autoBookkeepingSettings, captureLogs, categories, llmConfig, recurringProfiles, snapshotMeta, transactions],
+    [assetHoldings, assetQuoteCache, assetRecurringPlans, autoBookkeepingSettings, captureLogs, categories, llmConfig, recurringProfiles, snapshotMeta, transactions],
   );
 
   const refreshNativeSnapshot = useCallback(async () => {
@@ -163,6 +184,9 @@ const App: React.FC = () => {
         transactions: webSnapshot.transactions.length ? webSnapshot.transactions : nativeSnapshot.transactions,
         categories: webSnapshot.categories.length ? webSnapshot.categories : nativeSnapshot.categories,
         recurringProfiles: webSnapshot.recurringProfiles.length ? webSnapshot.recurringProfiles : nativeSnapshot.recurringProfiles,
+        assetHoldings: webSnapshot.assetHoldings.length ? webSnapshot.assetHoldings : nativeSnapshot.assetHoldings,
+        assetQuoteCache: webSnapshot.assetQuoteCache.length ? webSnapshot.assetQuoteCache : nativeSnapshot.assetQuoteCache,
+        assetRecurringPlans: webSnapshot.assetRecurringPlans.length ? webSnapshot.assetRecurringPlans : nativeSnapshot.assetRecurringPlans,
         llmConfig: webSnapshot.llmConfig,
         migratedFromWebStorage: true,
         autoBookkeepingSettings: {
@@ -176,18 +200,82 @@ const App: React.FC = () => {
     [],
   );
 
+  const processAssetRecurringPlans = useCallback(
+    async (snapshot: WalletSnapshot): Promise<{ snapshot: WalletSnapshot; hasUpdates: boolean }> => {
+      const today = new Date().toISOString().split('T')[0];
+      const holdings = snapshot.assetHoldings.map((holding) => ({ ...holding }));
+      const plans = snapshot.assetRecurringPlans.map((plan) => ({ ...plan }));
+      const quoteMap = new Map(snapshot.assetQuoteCache.map((quote) => [`${quote.assetType}:${quote.code}`, quote]));
+      let hasUpdates = false;
+
+      for (const plan of plans) {
+        if (!plan.enabled || plan.amount <= 0) {
+          continue;
+        }
+
+        const holdingIndex = holdings.findIndex((holding) => holding.id === plan.holdingId);
+        if (holdingIndex < 0 || holdings[holdingIndex].assetType !== 'fund') {
+          continue;
+        }
+
+        while (plan.nextDueDate <= today) {
+          const currentHolding = holdings[holdingIndex];
+          const quotes = runningInAndroid
+            ? await syncNativeAssetQuotes([currentHolding])
+            : await syncWebAssetQuotes([currentHolding]);
+          const quote = quotes.find((item) => item.assetType === currentHolding.assetType && item.code === currentHolding.code);
+          if (!quote || quote.price <= 0) {
+            break;
+          }
+
+          quoteMap.set(`${quote.assetType}:${quote.code}`, quote);
+          const execution = applyAssetRecurringPurchase(currentHolding, plan, quote.price);
+          if (!execution) {
+            break;
+          }
+
+          holdings[holdingIndex] = execution.holding;
+          Object.assign(plan, execution.plan);
+          hasUpdates = true;
+        }
+      }
+
+      if (!hasUpdates) {
+        return { snapshot, hasUpdates: false };
+      }
+
+      return {
+        snapshot: normalizeSnapshot({
+          ...snapshot,
+          assetHoldings: holdings,
+          assetRecurringPlans: plans,
+          assetQuoteCache: Array.from(quoteMap.values()),
+        }),
+        hasUpdates,
+      };
+    },
+    [runningInAndroid],
+  );
+
   const resolveSnapshotOnLoad = useCallback(
     async (snapshot: WalletSnapshot) => {
       const recurringResult = processRecurringTransactions(snapshot.recurringProfiles, snapshot.transactions);
-      if (!recurringResult.hasUpdates) {
+      let updatedSnapshot = normalizeSnapshot(
+        recurringResult.hasUpdates
+          ? {
+              ...snapshot,
+              transactions: [...recurringResult.newTransactions, ...snapshot.transactions],
+              recurringProfiles: recurringResult.updatedProfiles,
+            }
+          : snapshot,
+      );
+
+      const assetRecurringResult = await processAssetRecurringPlans(updatedSnapshot);
+      updatedSnapshot = assetRecurringResult.snapshot;
+
+      if (!recurringResult.hasUpdates && !assetRecurringResult.hasUpdates) {
         return snapshot;
       }
-
-      const updatedSnapshot = normalizeSnapshot({
-        ...snapshot,
-        transactions: [...recurringResult.newTransactions, ...snapshot.transactions],
-        recurringProfiles: recurringResult.updatedProfiles,
-      });
 
       if (runningInAndroid) {
         return saveNativeSnapshot(updatedSnapshot);
@@ -196,7 +284,7 @@ const App: React.FC = () => {
       saveWebSnapshot(updatedSnapshot);
       return updatedSnapshot;
     },
-    [processRecurringTransactions, runningInAndroid],
+    [processAssetRecurringPlans, processRecurringTransactions, runningInAndroid],
   );
 
   const refreshAutoBookkeepingStatus = useCallback(async () => {
@@ -496,6 +584,8 @@ const App: React.FC = () => {
         transactions,
         categories,
         recurringProfiles,
+        assetHoldings,
+        assetRecurringPlans,
       },
       importedData,
       mode,
@@ -506,6 +596,8 @@ const App: React.FC = () => {
       transactions: mergedData.transactions,
       categories: mergedData.categories,
       recurringProfiles: mergedData.recurringProfiles,
+      assetHoldings: mergedData.assetHoldings,
+      assetRecurringPlans: mergedData.assetRecurringPlans,
     });
 
     if (runningInAndroid) {
@@ -516,8 +608,8 @@ const App: React.FC = () => {
 
     alert(
       mode === 'overwrite'
-        ? `成功恢复 ${mergedData.transactions.length} 条交易和 ${mergedData.categories.length} 个分类。`
-        : `成功追加 ${importedData.transactions.length} 条交易，并合并 ${importedData.categories.length} 个分类。`,
+        ? `成功恢复 ${mergedData.transactions.length} 条交易和 ${mergedData.assetHoldings.length} 个持仓。`
+        : `成功追加 ${importedData.transactions.length} 条交易和 ${importedData.assetHoldings.length} 个持仓。`,
     );
   };
 
@@ -556,6 +648,167 @@ const App: React.FC = () => {
     }));
   };
 
+  const syncAssetQuotesForSnapshot = useCallback(
+    async (holdings: AssetHolding[], baseSnapshot: WalletSnapshot) => {
+      if (holdings.length === 0 || isSyncingAssets) {
+        return;
+      }
+
+      setIsSyncingAssets(true);
+      setAssetSyncMessage('正在同步');
+      try {
+        const quotes = runningInAndroid ? await syncNativeAssetQuotes(holdings) : await syncWebAssetQuotes(holdings);
+        const quoteMap = new Map(baseSnapshot.assetQuoteCache.map((quote) => [`${quote.assetType}:${quote.code}`, quote]));
+        quotes.forEach((quote) => {
+          quoteMap.set(`${quote.assetType}:${quote.code}`, quote);
+        });
+        const nextSnapshot = normalizeSnapshot({
+          ...baseSnapshot,
+          assetQuoteCache: Array.from(quoteMap.values()),
+        });
+
+        if (runningInAndroid) {
+          applySnapshot(await saveNativeSnapshot(nextSnapshot));
+        } else {
+          applySnapshot(nextSnapshot);
+        }
+        setAssetSyncMessage('同步完成');
+      } catch (error) {
+        console.error('Failed to sync asset quotes', error);
+        setAssetSyncMessage('同步失败');
+      } finally {
+        setIsSyncingAssets(false);
+      }
+    },
+    [applySnapshot, isSyncingAssets, runningInAndroid],
+  );
+
+  const handleAddAssetHolding = async (data: Omit<AssetHolding, 'id' | 'createdAt' | 'updatedAt'>) => {
+    const now = new Date().toISOString();
+    const assetHolding: AssetHolding = {
+      id: uuidv4(),
+      createdAt: now,
+      updatedAt: now,
+      ...data,
+    };
+
+    if (runningInAndroid) {
+      const nextSnapshot = await saveNativeAssetHolding(assetHolding);
+      applySnapshot(nextSnapshot);
+      void syncAssetQuotesForSnapshot(nextSnapshot.assetHoldings, nextSnapshot);
+      return;
+    }
+
+    const nextSnapshot = normalizeSnapshot({
+      ...buildCurrentSnapshot(),
+      assetHoldings: [assetHolding, ...assetHoldings],
+    });
+    applySnapshot(nextSnapshot);
+    void syncAssetQuotesForSnapshot(nextSnapshot.assetHoldings, nextSnapshot);
+  };
+
+  const handleUpdateAssetHolding = async (id: string, data: Omit<AssetHolding, 'id' | 'createdAt' | 'updatedAt'>) => {
+    const original = assetHoldings.find((holding) => holding.id === id);
+    if (!original) {
+      return;
+    }
+
+    const assetHolding: AssetHolding = {
+      ...original,
+      ...data,
+      updatedAt: new Date().toISOString(),
+    };
+
+    if (runningInAndroid) {
+      const nextSnapshot = await saveNativeAssetHolding(assetHolding);
+      applySnapshot(nextSnapshot);
+      void syncAssetQuotesForSnapshot(nextSnapshot.assetHoldings, nextSnapshot);
+      return;
+    }
+
+    const nextSnapshot = normalizeSnapshot({
+      ...buildCurrentSnapshot(),
+      assetHoldings: assetHoldings.map((holding) => (holding.id === id ? assetHolding : holding)),
+    });
+    applySnapshot(nextSnapshot);
+    void syncAssetQuotesForSnapshot(nextSnapshot.assetHoldings, nextSnapshot);
+  };
+
+  const handleDeleteAssetHolding = async (id: string) => {
+    if (!window.confirm('确认删除？')) {
+      return;
+    }
+
+    if (runningInAndroid) {
+      applySnapshot(await deleteNativeAssetHolding(id));
+      return;
+    }
+
+    setAssetHoldings((previous) => previous.filter((holding) => holding.id !== id));
+    setAssetRecurringPlans((previous) => previous.filter((plan) => plan.holdingId !== id));
+    setAssetQuoteCache((previous) => {
+      const deleted = assetHoldings.find((holding) => holding.id === id);
+      if (!deleted) {
+        return previous;
+      }
+      return previous.filter((quote) => quote.assetType !== deleted.assetType || quote.code !== deleted.code);
+    });
+  };
+
+  const handleSaveAssetRecurringPlan = async (data: Omit<AssetRecurringPlan, 'id' | 'createdAt' | 'updatedAt'>, existingId?: string) => {
+    const now = new Date().toISOString();
+    const existingPlan = existingId ? assetRecurringPlans.find((plan) => plan.id === existingId) : null;
+    const plan: AssetRecurringPlan = {
+      id: existingPlan?.id ?? uuidv4(),
+      createdAt: existingPlan?.createdAt ?? now,
+      updatedAt: now,
+      ...data,
+    };
+    const nextSnapshot = normalizeSnapshot({
+      ...buildCurrentSnapshot(),
+      assetRecurringPlans: existingPlan
+        ? assetRecurringPlans.map((item) => (item.id === existingPlan.id ? plan : item))
+        : [plan, ...assetRecurringPlans],
+    });
+
+    if (runningInAndroid) {
+      applySnapshot(await saveNativeSnapshot(nextSnapshot));
+      return;
+    }
+
+    applySnapshot(nextSnapshot);
+  };
+
+  const handleDeleteAssetRecurringPlan = async (id: string) => {
+    const nextSnapshot = normalizeSnapshot({
+      ...buildCurrentSnapshot(),
+      assetRecurringPlans: assetRecurringPlans.filter((plan) => plan.id !== id),
+    });
+
+    if (runningInAndroid) {
+      applySnapshot(await saveNativeSnapshot(nextSnapshot));
+      return;
+    }
+
+    applySnapshot(nextSnapshot);
+  };
+
+  const handleSyncAssetQuotes = useCallback(async () => {
+    await syncAssetQuotesForSnapshot(assetHoldings, buildCurrentSnapshot());
+  }, [assetHoldings, buildCurrentSnapshot, syncAssetQuotesForSnapshot]);
+
+  const handleAnalyzeAssetScreenshot = async (imageBase64: string): Promise<AssetImportCandidate[]> => {
+    if (!runningInAndroid) {
+      throw new Error('当前环境不支持截图识别');
+    }
+
+    const result = await analyzeNativeAssetScreenshot(imageBase64);
+    if (!result.ok) {
+      throw new Error(result.message || '识别失败');
+    }
+    return result.holdings;
+  };
+
   const renderContent = () => {
     switch (activeTab) {
       case AppTab.DASHBOARD:
@@ -570,13 +823,30 @@ const App: React.FC = () => {
       case AppTab.STATS:
         return <Stats transactions={transactions} categories={categories} />;
       case AppTab.ANALYSIS:
-        return <Analysis transactions={transactions} categories={categories} />;
+        return (
+          <Analysis
+            assetHoldings={assetHoldings}
+            assetQuoteCache={assetQuoteCache}
+            assetRecurringPlans={assetRecurringPlans}
+            isSyncingAssets={isSyncingAssets}
+            assetSyncMessage={assetSyncMessage}
+            onAddAssetHolding={handleAddAssetHolding}
+            onUpdateAssetHolding={handleUpdateAssetHolding}
+            onDeleteAssetHolding={handleDeleteAssetHolding}
+            onSaveAssetRecurringPlan={handleSaveAssetRecurringPlan}
+            onDeleteAssetRecurringPlan={handleDeleteAssetRecurringPlan}
+            onSyncAssetQuotes={handleSyncAssetQuotes}
+            onAnalyzeAssetScreenshot={handleAnalyzeAssetScreenshot}
+          />
+        );
       case AppTab.SETTINGS:
         return (
           <Settings
             transactions={transactions}
             categories={categories}
             recurringProfiles={recurringProfiles}
+            assetHoldings={assetHoldings}
+            assetRecurringPlans={assetRecurringPlans}
             llmConfig={llmConfig}
             autoBookkeepingSettings={autoBookkeepingSettings}
             captureLogs={captureLogs}
@@ -608,7 +878,7 @@ const App: React.FC = () => {
       case AppTab.STATS:
         return '数据统计';
       case AppTab.ANALYSIS:
-        return '财务分析';
+        return '资产管理';
       case AppTab.SETTINGS:
         return '设置';
       default:

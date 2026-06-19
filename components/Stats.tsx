@@ -1,6 +1,7 @@
 import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { Transaction, Category, TransactionType } from '../types';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, AreaChart, Area, XAxis, CartesianGrid, YAxis } from 'recharts';
+import { buildAnalysisSnapshot } from '../services/analysisEngine';
 
 interface StatsProps {
   transactions: Transaction[];
@@ -93,6 +94,23 @@ const Stats: React.FC<StatsProps> = ({ transactions, categories }) => {
 
       return { transactions: filtered, totalIncome, totalExpense, period };
   }, [selectedPeriod, periods, transactions]);
+
+  const analysis = useMemo(() => {
+      if (!currentPeriodData.period) {
+          return null;
+      }
+
+      const index = periods.findIndex((period) => period.value === selectedPeriod);
+      const previousPeriod = periods[index + 1];
+
+      return buildAnalysisSnapshot({
+          transactions,
+          categories,
+          period: viewMode,
+          range: currentPeriodData.period,
+          previousRange: previousPeriod ? { start: previousPeriod.start, end: previousPeriod.end } : undefined,
+      });
+  }, [categories, currentPeriodData.period, periods, selectedPeriod, transactions, viewMode]);
 
   // 3. Trend Data
   const trendData = useMemo(() => {
@@ -206,6 +224,46 @@ const Stats: React.FC<StatsProps> = ({ transactions, categories }) => {
               <p className="text-2xl font-bold text-success">¥{currentPeriodData.totalIncome.toFixed(2)}</p>
           </div>
       </div>
+
+      {analysis && (
+        <div className="grid grid-cols-2 gap-4">
+            <div className="bg-white border border-border p-5 rounded-2xl">
+                <p className="text-xs text-secondary uppercase tracking-wider mb-2">净结余</p>
+                <p className={`text-2xl font-bold ${analysis.financialHealth.netBalance >= 0 ? 'text-success' : 'text-danger'}`}>
+                    ¥{analysis.financialHealth.netBalance.toFixed(2)}
+                </p>
+            </div>
+            <div className="bg-white border border-border p-5 rounded-2xl">
+                <p className="text-xs text-secondary uppercase tracking-wider mb-2">储蓄率</p>
+                <p className={`text-2xl font-bold ${
+                    analysis.financialHealth.savingsRate >= 20
+                    ? 'text-success'
+                    : analysis.financialHealth.savingsRate >= 0
+                      ? 'text-warning'
+                      : 'text-danger'
+                }`}>
+                    {analysis.financialHealth.savingsRate.toFixed(1)}%
+                </p>
+            </div>
+            <div className="bg-white border border-border p-5 rounded-2xl">
+                <p className="text-xs text-secondary uppercase tracking-wider mb-2">日均支出</p>
+                <p className="text-2xl font-bold text-primary">¥{analysis.financialHealth.avgDailyExpense.toFixed(2)}</p>
+            </div>
+            <div className="bg-white border border-border p-5 rounded-2xl">
+                <p className="text-xs text-secondary uppercase tracking-wider mb-2">支出增长</p>
+                <p className={`text-2xl font-bold ${
+                    analysis.financialHealth.expenseGrowthRate > 10
+                    ? 'text-danger'
+                    : analysis.financialHealth.expenseGrowthRate > 0
+                      ? 'text-warning'
+                      : 'text-success'
+                }`}>
+                    {analysis.financialHealth.expenseGrowthRate > 0 ? '+' : ''}
+                    {analysis.financialHealth.expenseGrowthRate.toFixed(1)}%
+                </p>
+            </div>
+        </div>
+      )}
 
       {/* 4. Trend Chart */}
       <div className="bg-white border border-border p-6 rounded-2xl">
@@ -335,6 +393,27 @@ const Stats: React.FC<StatsProps> = ({ transactions, categories }) => {
             </div>
           )}
       </div>
+
+      {analysis && (
+        <div className="bg-white border border-border p-6 rounded-2xl">
+            <h3 className="text-base font-semibold text-primary mb-4">支出排行</h3>
+            <div className="space-y-4">
+                {analysis.topCategories.map((category, index) => (
+                    <div key={category.name} className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                            <span className="text-lg font-bold text-primary w-6">#{index + 1}</span>
+                            <div>
+                                <p className="text-sm font-medium text-primary">{category.name}</p>
+                                <p className="text-xs text-zinc-400">{category.percentage.toFixed(1)}% 总支出</p>
+                            </div>
+                        </div>
+                        <span className="text-base font-semibold text-primary">¥{category.amount.toFixed(2)}</span>
+                    </div>
+                ))}
+                {analysis.topCategories.length === 0 && <p className="text-sm text-secondary">暂无支出</p>}
+            </div>
+        </div>
+      )}
     </div>
   );
 };

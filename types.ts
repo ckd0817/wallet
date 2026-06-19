@@ -56,6 +56,70 @@ export interface RecurringProfile {
   nextDueDate: string;
 }
 
+export type AssetType = 'stock' | 'fund';
+export type AssetMarket = 'sh' | 'sz' | 'fund';
+export type AssetRecurringFrequency = 'daily' | 'weekly' | 'monthly';
+
+export interface AssetHolding {
+  id: string;
+  assetType: AssetType;
+  code: string;
+  market: AssetMarket;
+  name: string;
+  shares: number;
+  costAmount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AssetQuote {
+  assetType: AssetType;
+  code: string;
+  name: string;
+  price: number;
+  changePercent: number;
+  quoteTime: string;
+  source: string;
+  syncedAt: string;
+  error?: string;
+}
+
+export interface AssetImportCandidate {
+  assetType: AssetType;
+  code: string;
+  market: AssetMarket;
+  name: string;
+  shares: number;
+  costAmount: number;
+  totalCost?: number;
+  unitCost?: number;
+  marketValue?: number;
+  holdingProfit?: number;
+  profitRate?: number;
+  costSource?: 'total_cost' | 'unit_cost' | 'market_minus_profit' | 'market_by_rate' | 'missing';
+}
+
+export interface AssetRecurringPlan {
+  id: string;
+  holdingId: string;
+  amount: number;
+  frequency: AssetRecurringFrequency;
+  startDate: string;
+  nextDueDate: string;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AssetScreenshotAnalysisResult {
+  ok: boolean;
+  message: string;
+  holdings: AssetImportCandidate[];
+  assistantReplyRaw?: string;
+  responseBodyRaw?: string;
+  failureStage?: string;
+}
+
 export interface DailyStats {
   date: string;
   income: number;
@@ -109,6 +173,9 @@ export interface WalletSnapshot {
   captureLogs: CaptureAttemptLog[];
   categories: Category[];
   recurringProfiles: RecurringProfile[];
+  assetHoldings: AssetHolding[];
+  assetQuoteCache: AssetQuote[];
+  assetRecurringPlans: AssetRecurringPlan[];
   llmConfig: LLMConfig;
   autoBookkeepingSettings: AutoBookkeepingSettings;
 }
@@ -117,6 +184,8 @@ export interface WalletBackupData {
   transactions: Transaction[];
   categories: Category[];
   recurringProfiles: RecurringProfile[];
+  assetHoldings: AssetHolding[];
+  assetRecurringPlans: AssetRecurringPlan[];
 }
 
 export interface WalletBackupFile {
