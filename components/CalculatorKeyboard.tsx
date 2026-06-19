@@ -4,10 +4,11 @@ import { Calculator, RotateCcw, X } from 'lucide-react';
 interface CalculatorKeyboardProps {
   onResult: (value: string) => void;
   onClose: () => void;
+  initialValue?: string;
 }
 
-const CalculatorKeyboard: React.FC<CalculatorKeyboardProps> = ({ onResult, onClose }) => {
-  const [expression, setExpression] = useState('');
+const CalculatorKeyboard: React.FC<CalculatorKeyboardProps> = ({ onResult, onClose, initialValue = '' }) => {
+  const [expression, setExpression] = useState(initialValue);
   const [result, setResult] = useState('');
   const [isNewCalculation, setIsNewCalculation] = useState(true);
 

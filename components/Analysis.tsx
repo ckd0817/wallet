@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Camera, Plus, ReceiptText, RefreshCcw, Trash2 } from 'lucide-react';
+import { CalendarClock, Camera, Plus, ReceiptText, Trash2 } from 'lucide-react';
 import {
   Area,
   Cell,
@@ -23,6 +23,7 @@ import {
   AssetRecurringPlan,
   AssetTradeRecord,
   AssetType,
+  Transaction,
 } from '../types';
 import {
   buildAssetHoldingDistribution,
@@ -37,13 +38,12 @@ import {
 } from '../services/assetEngine';
 
 interface AnalysisProps {
+  transactions: Transaction[];
   assetHoldings: AssetHolding[];
   assetQuoteCache: AssetQuote[];
   assetRecurringPlans: AssetRecurringPlan[];
   assetPerformanceHistory: AssetPerformanceSnapshot[];
   assetTradeRecords: AssetTradeRecord[];
-  isSyncingAssets: boolean;
-  assetSyncMessage: string;
   onAddAssetHolding: (holding: Omit<AssetHolding, 'id' | 'createdAt' | 'updatedAt'>) => Promise<void> | void;
   onUpdateAssetHolding: (
     id: string,
@@ -75,6 +75,14 @@ const emptyForm: AssetFormState = {
   averageCost: '',
 };
 
+const recurringFrequencyOptions: { value: AssetRecurringFrequency; label: string }[] = [
+  { value: 'daily', label: '每天' },
+  { value: 'weekly', label: '每周' },
+  { value: 'monthly', label: '每月' },
+];
+
+const RECENT_EXPENSE_DAYS = 30;
+
 const readOptionalAmount = (value: string) => {
   const normalized = value.trim();
   if (!normalized) {
@@ -84,14 +92,53 @@ const readOptionalAmount = (value: string) => {
   return Number.isFinite(amount) ? amount : Number.NaN;
 };
 
+const calculateWealthFreedomDays = (totalAssets: number, transactions: Transaction[]) => {
+  const end = new Date();
+  end.setDate(end.getDate() - 1);
+  end.setHours(23, 59, 59, 999);
+  const start = new Date(end);
+  start.setDate(end.getDate() - RECENT_EXPENSE_DAYS + 1);
+  start.setHours(0, 0, 0, 0);
+
+  const recentExpense = transactions
+    .filter((transaction) => {
+      if (transaction.type !== 'expense') {
+        return false;
+      }
+      const transactionDate = new Date(transaction.date);
+      return transactionDate >= start && transactionDate <= end;
+    })
+    .reduce((sum, transaction) => sum + transaction.amount, 0);
+  const avgDailyExpense = recentExpense / RECENT_EXPENSE_DAYS;
+
+  if (avgDailyExpense <= 0) {
+    return {
+      display: '暂无',
+      subValue: '近30天无支出',
+    };
+  }
+
+  const days = Math.max(0, totalAssets / avgDailyExpense);
+  return {
+    display: formatFreedomDays(days),
+    subValue: `日均 ¥${avgDailyExpense.toFixed(2)}`,
+  };
+};
+
+const formatFreedomDays = (days: number) => {
+  if (days < 1) {
+    return '<1天';
+  }
+  return `${Math.floor(days).toLocaleString('zh-CN')}天`;
+};
+
 const Analysis: React.FC<AnalysisProps> = ({
+  transactions,
   assetHoldings,
   assetQuoteCache,
   assetRecurringPlans,
   assetPerformanceHistory,
   assetTradeRecords,
-  isSyncingAssets,
-  assetSyncMessage,
   onAddAssetHolding,
   onUpdateAssetHolding,
   onDeleteAssetHolding,
@@ -105,6 +152,7 @@ const Analysis: React.FC<AnalysisProps> = ({
   const [editingId, setEditingId] = useState('');
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isTradeRecordsOpen, setIsTradeRecordsOpen] = useState(false);
+  const [isRecurringManagerOpen, setIsRecurringManagerOpen] = useState(false);
   const [isAnalyzingImage, setIsAnalyzingImage] = useState(false);
   const [importCandidates, setImportCandidates] = useState<AssetImportCandidate[]>([]);
   const [operationType, setOperationType] = useState<AssetOperationType>('buy');
@@ -117,6 +165,10 @@ const Analysis: React.FC<AnalysisProps> = ({
 
   const positions = useMemo(() => buildAssetPositions(assetHoldings, assetQuoteCache), [assetHoldings, assetQuoteCache]);
   const summary = useMemo(() => buildAssetSummary(positions), [positions]);
+  const freedomDays = useMemo(
+    () => calculateWealthFreedomDays(summary.totalMarketValue, transactions),
+    [summary.totalMarketValue, transactions],
+  );
   const displayPerformanceHistory = useMemo(
     () =>
       mergeAssetPerformanceHistory(
@@ -354,26 +406,20 @@ const Analysis: React.FC<AnalysisProps> = ({
           value={`¥${summary.dailyChangeAmount.toFixed(2)}`}
           tone={summary.dailyChangeAmount >= 0 ? 'positive' : 'negative'}
         />
-        <SummaryCard label="最近同步" value={summary.latestSyncedAt ? new Date(summary.latestSyncedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : '暂无'} />
+        <SummaryCard label="不用上班天数" value={freedomDays.display} subValue={freedomDays.subValue} />
       </div>
 
       <div className="grid grid-cols-4 gap-2">
         <AssetActionButton icon={Plus} label="添加资产" onClick={openAddForm} />
         <AssetActionButton icon={ReceiptText} label="交易记录" onClick={() => setIsTradeRecordsOpen(true)} />
         <AssetActionButton icon={Camera} label="截图导入" onClick={() => fileInputRef.current?.click()} />
-        <AssetActionButton
-          icon={RefreshCcw}
-          label="刷新"
-          onClick={() => onSyncAssetQuotes()}
-          disabled={isSyncingAssets}
-          active={isSyncingAssets}
-        />
+        <AssetActionButton icon={CalendarClock} label="定投管理" onClick={() => setIsRecurringManagerOpen(true)} />
         <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageSelected} />
       </div>
 
-      {(assetSyncMessage || isAnalyzingImage) && (
+      {isAnalyzingImage && (
         <div className="text-sm text-secondary px-1">
-          {isAnalyzingImage ? '正在识别' : assetSyncMessage}
+          正在识别
         </div>
       )}
 
@@ -563,11 +609,7 @@ const Analysis: React.FC<AnalysisProps> = ({
                   <label className="block">
                     <span className="block text-xs text-secondary mb-2">频率</span>
                     <div className="flex bg-white p-1 rounded-xl border border-border">
-                      {([
-                        { value: 'daily', label: '每天' },
-                        { value: 'weekly', label: '每周' },
-                        { value: 'monthly', label: '每月' },
-                      ] as { value: AssetRecurringFrequency; label: string }[]).map((item) => (
+                      {recurringFrequencyOptions.map((item) => (
                         <button
                           key={item.value}
                           type="button"
@@ -629,6 +671,18 @@ const Analysis: React.FC<AnalysisProps> = ({
 
       {isTradeRecordsOpen && createPortal(
         <TradeRecordsPanel records={assetTradeRecords} onClose={() => setIsTradeRecordsOpen(false)} />,
+        document.body,
+      )}
+
+      {isRecurringManagerOpen && createPortal(
+        <RecurringPlansPanel
+          holdings={assetHoldings}
+          quotes={assetQuoteCache}
+          plans={assetRecurringPlans}
+          onSave={onSaveAssetRecurringPlan}
+          onDelete={onDeleteAssetRecurringPlan}
+          onClose={() => setIsRecurringManagerOpen(false)}
+        />,
         document.body,
       )}
     </div>
@@ -724,6 +778,294 @@ const TradeRecordsPanel = ({ records, onClose }: { records: AssetTradeRecord[]; 
     </div>
   );
 };
+
+type RecurringPlanDraft = {
+  existingId?: string;
+  holdingId: string;
+  amount: string;
+  frequency: AssetRecurringFrequency;
+  nextDueDate: string;
+  enabled: boolean;
+  startDate?: string;
+};
+
+const RecurringPlansPanel = ({
+  holdings,
+  quotes,
+  plans,
+  onSave,
+  onDelete,
+  onClose,
+}: {
+  holdings: AssetHolding[];
+  quotes: AssetQuote[];
+  plans: AssetRecurringPlan[];
+  onSave: AnalysisProps['onSaveAssetRecurringPlan'];
+  onDelete: AnalysisProps['onDeleteAssetRecurringPlan'];
+  onClose: () => void;
+}) => {
+  const [draft, setDraft] = useState<RecurringPlanDraft | null>(null);
+  const today = new Date().toISOString().split('T')[0];
+  const fundHoldings = holdings.filter((holding) => holding.assetType === 'fund');
+  const planRows = plans
+    .map((plan) => {
+      const holding = fundHoldings.find((item) => item.id === plan.holdingId);
+      if (!holding) {
+        return null;
+      }
+      const quote = quotes.find((item) => item.assetType === holding.assetType && item.code === holding.code);
+      return { plan, holding, name: quote?.name || holding.name || holding.code };
+    })
+    .filter((item): item is { plan: AssetRecurringPlan; holding: AssetHolding; name: string } => Boolean(item))
+    .sort((left, right) => {
+      if (left.plan.enabled !== right.plan.enabled) {
+        return left.plan.enabled ? -1 : 1;
+      }
+      return left.plan.nextDueDate.localeCompare(right.plan.nextDueDate);
+    });
+  const holdingsWithoutPlan = fundHoldings.filter((holding) => !plans.some((plan) => plan.holdingId === holding.id));
+  const enabledCount = planRows.filter(({ plan }) => plan.enabled).length;
+  const dueCount = planRows.filter(({ plan }) => plan.enabled && plan.nextDueDate <= today).length;
+  const nearestDate = planRows
+    .filter(({ plan }) => plan.enabled)
+    .map(({ plan }) => plan.nextDueDate)
+    .sort()[0] ?? '暂无';
+
+  const getHoldingName = (holding: AssetHolding) => {
+    const quote = quotes.find((item) => item.assetType === holding.assetType && item.code === holding.code);
+    return quote?.name || holding.name || holding.code;
+  };
+
+  const startCreate = () => {
+    const holding = holdingsWithoutPlan[0];
+    if (!holding) {
+      return;
+    }
+    setDraft({
+      holdingId: holding.id,
+      amount: '',
+      frequency: 'monthly',
+      nextDueDate: today,
+      enabled: false,
+    });
+  };
+
+  const startEdit = (plan: AssetRecurringPlan) => {
+    setDraft({
+      existingId: plan.id,
+      holdingId: plan.holdingId,
+      amount: String(plan.amount),
+      frequency: plan.frequency,
+      nextDueDate: plan.nextDueDate,
+      enabled: plan.enabled,
+      startDate: plan.startDate,
+    });
+  };
+
+  const saveDraft = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!draft) {
+      return;
+    }
+    const holding = fundHoldings.find((item) => item.id === draft.holdingId);
+    const amount = Number(draft.amount || 0);
+    if (!holding || amount <= 0 || !draft.nextDueDate) {
+      alert('请填写完整计划');
+      return;
+    }
+    await onSave(
+      {
+        holdingId: holding.id,
+        amount,
+        frequency: draft.frequency,
+        startDate: draft.startDate ?? draft.nextDueDate,
+        nextDueDate: draft.nextDueDate,
+        enabled: draft.enabled,
+      },
+      draft.existingId,
+    );
+    setDraft(null);
+  };
+
+  const togglePlan = async (plan: AssetRecurringPlan) => {
+    await onSave(
+      {
+        holdingId: plan.holdingId,
+        amount: plan.amount,
+        frequency: plan.frequency,
+        startDate: plan.startDate,
+        nextDueDate: plan.nextDueDate,
+        enabled: !plan.enabled,
+      },
+      plan.id,
+    );
+  };
+
+  const deletePlan = async (plan: AssetRecurringPlan) => {
+    if (!window.confirm('删除定投计划？')) {
+      return;
+    }
+    await onDelete(plan.id);
+    if (draft?.existingId === plan.id) {
+      setDraft(null);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/30 flex items-end justify-center" style={{ zIndex: 100 }}>
+      <div className="w-full max-w-2xl max-h-[calc(100dvh-4rem)] bg-white rounded-t-3xl flex flex-col overflow-hidden">
+        <div className="flex items-center justify-between px-6 pt-6 pb-4 border-b border-border">
+          <h2 className="text-lg font-semibold text-primary">定投管理</h2>
+          <button type="button" onClick={onClose} className="text-sm font-semibold text-secondary">
+            关闭
+          </button>
+        </div>
+        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+          <div className="grid grid-cols-3 gap-2">
+            <RecurringSummaryCard label="计划" value={String(planRows.length)} />
+            <RecurringSummaryCard label="开启" value={String(enabledCount)} />
+            <RecurringSummaryCard label="待执行" value={String(dueCount)} />
+          </div>
+          <div className="rounded-2xl border border-border bg-surface/40 p-4 flex items-center justify-between gap-3">
+            <div>
+              <p className="text-xs text-secondary mb-1">最近定投</p>
+              <p className="text-base font-semibold text-primary">{nearestDate}</p>
+            </div>
+            {holdingsWithoutPlan.length > 0 && !draft && (
+              <button
+                type="button"
+                onClick={startCreate}
+                className="h-10 px-4 rounded-xl bg-primary text-white text-sm font-semibold"
+              >
+                新增计划
+              </button>
+            )}
+          </div>
+
+          {draft && (
+            <form onSubmit={saveDraft} className="rounded-2xl border border-border bg-white p-4 space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-primary">{draft.existingId ? '编辑计划' : '新增计划'}</h3>
+                <button
+                  type="button"
+                  onClick={() => setDraft((previous) => previous ? { ...previous, enabled: !previous.enabled } : previous)}
+                  className={`px-3 py-1.5 rounded-full text-xs font-semibold ${
+                    draft.enabled ? 'bg-primary text-white' : 'bg-white text-secondary border border-border'
+                  }`}
+                >
+                  {draft.enabled ? '已开启' : '已关闭'}
+                </button>
+              </div>
+
+              {!draft.existingId && (
+                <label className="block">
+                  <span className="block text-xs text-secondary mb-2">基金</span>
+                  <select
+                    value={draft.holdingId}
+                    onChange={(event) => setDraft((previous) => previous ? { ...previous, holdingId: event.target.value } : previous)}
+                    className="w-full h-12 rounded-xl border border-border px-4 text-primary bg-white outline-none focus:border-primary"
+                  >
+                    {holdingsWithoutPlan.map((holding) => (
+                      <option key={holding.id} value={holding.id}>
+                        {getHoldingName(holding)} · {holding.code}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+
+              <Field label="定投金额" value={draft.amount} onChange={(value) => setDraft((previous) => previous ? { ...previous, amount: value } : previous)} inputMode="decimal" />
+              <label className="block">
+                <span className="block text-xs text-secondary mb-2">频率</span>
+                <div className="flex bg-surface p-1 rounded-xl border border-border">
+                  {recurringFrequencyOptions.map((item) => (
+                    <button
+                      key={item.value}
+                      type="button"
+                      onClick={() => setDraft((previous) => previous ? { ...previous, frequency: item.value } : previous)}
+                      className={`flex-1 py-2 rounded-lg text-sm font-semibold ${
+                        draft.frequency === item.value ? 'bg-primary text-white' : 'text-secondary'
+                      }`}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              </label>
+              <label className="block">
+                <span className="block text-xs text-secondary mb-2">下次定投</span>
+                <input
+                  type="date"
+                  value={draft.nextDueDate}
+                  onChange={(event) => setDraft((previous) => previous ? { ...previous, nextDueDate: event.target.value } : previous)}
+                  className="w-full h-12 rounded-xl border border-border px-4 text-primary outline-none focus:border-primary"
+                />
+              </label>
+              <div className="grid grid-cols-2 gap-3">
+                <button type="button" onClick={() => setDraft(null)} className="h-10 rounded-xl border border-border text-primary font-semibold">
+                  取消
+                </button>
+                <button type="submit" className="h-10 rounded-xl bg-primary text-white font-semibold">
+                  保存
+                </button>
+              </div>
+            </form>
+          )}
+
+          {planRows.length === 0 ? (
+            <div className="h-40 flex flex-col items-center justify-center text-sm text-zinc-300">
+              <p>{fundHoldings.length > 0 ? '暂无计划' : '暂无基金持仓'}</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {planRows.map(({ plan, holding, name }) => {
+                const status = plan.enabled ? (plan.nextDueDate <= today ? '待执行' : '已开启') : '已关闭';
+                return (
+                  <div key={plan.id} className="rounded-2xl border border-border bg-white p-4">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-primary truncate">{name}</p>
+                        <p className="text-xs text-secondary mt-1">基金 · {holding.code}</p>
+                      </div>
+                      <span className={`px-2.5 py-1 rounded-full text-xs font-semibold flex-shrink-0 ${
+                        plan.enabled ? 'bg-primary text-white' : 'bg-surface text-secondary border border-border'
+                      }`}>
+                        {status}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-3 mt-4 text-xs">
+                      <Meta label="金额" value={`¥${plan.amount.toFixed(2)}`} />
+                      <Meta label="频率" value={formatRecurringFrequency(plan.frequency)} />
+                      <Meta label="下次" value={plan.nextDueDate} />
+                    </div>
+                    <div className="grid grid-cols-3 gap-2 mt-4">
+                      <button type="button" onClick={() => startEdit(plan)} className="h-9 rounded-xl border border-border text-sm font-semibold text-primary">
+                        修改
+                      </button>
+                      <button type="button" onClick={() => togglePlan(plan)} className="h-9 rounded-xl border border-border text-sm font-semibold text-primary">
+                        {plan.enabled ? '暂停' : '开启'}
+                      </button>
+                      <button type="button" onClick={() => deletePlan(plan)} className="h-9 rounded-xl border border-border text-sm font-semibold text-danger">
+                        删除
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const RecurringSummaryCard = ({ label, value }: { label: string; value: string }) => (
+  <div className="rounded-2xl border border-border bg-white p-4">
+    <p className="text-xs text-secondary mb-2">{label}</p>
+    <p className="text-xl font-bold text-primary">{value}</p>
+  </div>
+);
 
 type AssetTrendRange = 'week' | 'month' | 'year' | 'all';
 type AssetCalendarMode = 'day' | 'month' | 'year';
@@ -984,6 +1326,9 @@ const formatTradeType = (tradeType: AssetTradeRecord['tradeType']) => {
   }
   return tradeType === 'sell' ? '减仓' : '加仓';
 };
+
+const formatRecurringFrequency = (frequency: AssetRecurringFrequency) =>
+  recurringFrequencyOptions.find((item) => item.value === frequency)?.label ?? '每月';
 
 const tradeTone = (tradeType: AssetTradeRecord['tradeType']) =>
   tradeType === 'sell' ? 'text-success' : 'text-danger';

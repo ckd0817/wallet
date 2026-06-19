@@ -214,56 +214,42 @@ const Stats: React.FC<StatsProps> = ({ transactions, categories }) => {
       </div>
 
       {/* 3. Overview */}
-      <div className="grid grid-cols-2 gap-4">
-          <div className="bg-white border border-border p-5 rounded-2xl">
-              <p className="text-xs text-secondary uppercase tracking-wider mb-2">总支出</p>
-              <p className="text-2xl font-bold text-primary">¥{currentPeriodData.totalExpense.toFixed(2)}</p>
-          </div>
-          <div className="bg-white border border-border p-5 rounded-2xl">
-              <p className="text-xs text-secondary uppercase tracking-wider mb-2">总收入</p>
-              <p className="text-2xl font-bold text-success">¥{currentPeriodData.totalIncome.toFixed(2)}</p>
-          </div>
-      </div>
-
-      {analysis && (
-        <div className="grid grid-cols-2 gap-4">
-            <div className="bg-white border border-border p-5 rounded-2xl">
-                <p className="text-xs text-secondary uppercase tracking-wider mb-2">净结余</p>
-                <p className={`text-2xl font-bold ${analysis.financialHealth.netBalance >= 0 ? 'text-success' : 'text-danger'}`}>
-                    ¥{analysis.financialHealth.netBalance.toFixed(2)}
-                </p>
-            </div>
-            <div className="bg-white border border-border p-5 rounded-2xl">
-                <p className="text-xs text-secondary uppercase tracking-wider mb-2">储蓄率</p>
-                <p className={`text-2xl font-bold ${
-                    analysis.financialHealth.savingsRate >= 20
-                    ? 'text-success'
+      <div className="grid grid-cols-2 gap-3">
+          <StatsMetricCard label="总收入" value={`¥${currentPeriodData.totalIncome.toFixed(2)}`} tone="success" />
+          <StatsMetricCard label="总支出" value={`¥${currentPeriodData.totalExpense.toFixed(2)}`} />
+          {analysis && (
+            <>
+              <StatsMetricCard
+                label="净结余"
+                value={`¥${analysis.financialHealth.netBalance.toFixed(2)}`}
+                tone={analysis.financialHealth.netBalance >= 0 ? 'success' : 'danger'}
+              />
+              <StatsMetricCard
+                label="储蓄率"
+                value={`${analysis.financialHealth.savingsRate.toFixed(1)}%`}
+                tone={
+                  analysis.financialHealth.savingsRate >= 20
+                    ? 'success'
                     : analysis.financialHealth.savingsRate >= 0
-                      ? 'text-warning'
-                      : 'text-danger'
-                }`}>
-                    {analysis.financialHealth.savingsRate.toFixed(1)}%
-                </p>
-            </div>
-            <div className="bg-white border border-border p-5 rounded-2xl">
-                <p className="text-xs text-secondary uppercase tracking-wider mb-2">日均支出</p>
-                <p className="text-2xl font-bold text-primary">¥{analysis.financialHealth.avgDailyExpense.toFixed(2)}</p>
-            </div>
-            <div className="bg-white border border-border p-5 rounded-2xl">
-                <p className="text-xs text-secondary uppercase tracking-wider mb-2">支出增长</p>
-                <p className={`text-2xl font-bold ${
-                    analysis.financialHealth.expenseGrowthRate > 10
-                    ? 'text-danger'
+                      ? 'warning'
+                      : 'danger'
+                }
+              />
+              <StatsMetricCard label="日均支出" value={`¥${analysis.financialHealth.avgDailyExpense.toFixed(2)}`} />
+              <StatsMetricCard
+                label="支出增长"
+                value={`${analysis.financialHealth.expenseGrowthRate > 0 ? '+' : ''}${analysis.financialHealth.expenseGrowthRate.toFixed(1)}%`}
+                tone={
+                  analysis.financialHealth.expenseGrowthRate > 10
+                    ? 'danger'
                     : analysis.financialHealth.expenseGrowthRate > 0
-                      ? 'text-warning'
-                      : 'text-success'
-                }`}>
-                    {analysis.financialHealth.expenseGrowthRate > 0 ? '+' : ''}
-                    {analysis.financialHealth.expenseGrowthRate.toFixed(1)}%
-                </p>
-            </div>
-        </div>
-      )}
+                      ? 'warning'
+                      : 'success'
+                }
+              />
+            </>
+          )}
+      </div>
 
       {/* 4. Trend Chart */}
       <div className="bg-white border border-border p-6 rounded-2xl">
@@ -414,6 +400,32 @@ const Stats: React.FC<StatsProps> = ({ transactions, categories }) => {
             </div>
         </div>
       )}
+    </div>
+  );
+};
+
+const StatsMetricCard = ({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone?: 'success' | 'danger' | 'warning';
+}) => {
+  const toneClass =
+    tone === 'success'
+      ? 'text-success'
+      : tone === 'danger'
+        ? 'text-danger'
+        : tone === 'warning'
+          ? 'text-warning'
+          : 'text-primary';
+
+  return (
+    <div className="min-h-28 bg-white border border-border p-5 rounded-2xl flex flex-col justify-between">
+      <p className="text-xs text-secondary">{label}</p>
+      <p className={`text-2xl font-bold leading-tight ${toneClass}`}>{value}</p>
     </div>
   );
 };

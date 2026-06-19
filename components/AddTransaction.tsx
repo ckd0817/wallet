@@ -364,6 +364,7 @@ const AddTransaction: React.FC<AddTransactionProps> = ({
         {/* Calculator Keyboard Modal */}
         {showCalculator && (
           <CalculatorKeyboard
+            initialValue={amount}
             onResult={(value) => {
               setAmount(value);
               setShowCalculator(false);

@@ -88,7 +88,7 @@ const App: React.FC = () => {
   const [autoBookkeepingSettings, setAutoBookkeepingSettings] = useState<AutoBookkeepingSettings>(defaultAutoBookkeepingSettings());
   const [isInitialized, setIsInitialized] = useState(false);
   const [isSyncingAssets, setIsSyncingAssets] = useState(false);
-  const [assetSyncMessage, setAssetSyncMessage] = useState('');
+  const [assetSyncNotice, setAssetSyncNotice] = useState('');
   const isHydratingRef = useRef(false);
 
   const applySnapshot = useCallback((snapshot: WalletSnapshot) => {
@@ -488,6 +488,17 @@ const App: React.FC = () => {
   }, [openTransactionDetails, pendingEditTransactionId, transactions]);
 
   useEffect(() => {
+    if (!assetSyncNotice) {
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      setAssetSyncNotice('');
+    }, 3000);
+    return () => window.clearTimeout(timer);
+  }, [assetSyncNotice]);
+
+  useEffect(() => {
     if (!isInitialized || isHydratingRef.current || runningInAndroid) {
       return;
     }
@@ -707,7 +718,6 @@ const App: React.FC = () => {
       }
 
       setIsSyncingAssets(true);
-      setAssetSyncMessage('正在同步');
       try {
         const quotes = runningInAndroid ? await syncNativeAssetQuotes(holdings) : await syncWebAssetQuotes(holdings);
         const quoteMap = new Map(baseSnapshot.assetQuoteCache.map((quote) => [`${quote.assetType}:${quote.code}`, quote]));
@@ -750,10 +760,10 @@ const App: React.FC = () => {
         } else {
           applySnapshot(nextSnapshot);
         }
-        setAssetSyncMessage('同步完成');
+        setAssetSyncNotice('');
       } catch (error) {
         console.error('Failed to sync asset quotes', error);
-        setAssetSyncMessage('同步失败');
+        setAssetSyncNotice('行情同步失败');
       } finally {
         setIsSyncingAssets(false);
       }
@@ -926,13 +936,12 @@ const App: React.FC = () => {
       case AppTab.ANALYSIS:
         return (
           <Analysis
+            transactions={transactions}
             assetHoldings={assetHoldings}
             assetQuoteCache={assetQuoteCache}
             assetRecurringPlans={assetRecurringPlans}
             assetPerformanceHistory={assetPerformanceHistory}
             assetTradeRecords={assetTradeRecords}
-            isSyncingAssets={isSyncingAssets}
-            assetSyncMessage={assetSyncMessage}
             onAddAssetHolding={handleAddAssetHolding}
             onUpdateAssetHolding={handleUpdateAssetHolding}
             onDeleteAssetHolding={handleDeleteAssetHolding}
@@ -1003,6 +1012,12 @@ const App: React.FC = () => {
       >
         {renderContent()}
       </main>
+
+      {assetSyncNotice && (
+        <div className="fixed left-1/2 top-20 z-50 -translate-x-1/2 rounded-full bg-primary px-4 py-2 text-sm font-semibold text-white shadow-lg" role="status">
+          {assetSyncNotice}
+        </div>
+      )}
 
       <nav
         className="fixed bottom-0 left-0 right-0 z-40 bg-background/90 backdrop-blur-lg border-t border-border"
