@@ -19,6 +19,15 @@
 - 只要本项目代码有改动，并且变更会影响 Android 实际运行结果，就默认重新打包并安装到我的手机上。
 - 默认使用 `E:\AndroidStudioSDK\platform-tools\adb.exe` 安装。
 - 默认覆盖安装到当前已连接并已授权的真机，不要每次额外询问。
+- Release 签名文件路径：`E:\Android key\key`
+- Release key alias：`key0`
+- Release 证书：`CN=Chenkaida`
+- Release keystore 密码和 key 密码不要写入仓库；打包时向用户确认或使用当前会话已确认的密码。
+- 当前 Gradle release 产物默认是未签名 APK：`android\app\build\outputs\apk\release\app-release-unsigned.apk`
+- 正式 release 包需要手动执行 `zipalign` 和 `apksigner`，默认使用最新 Android build-tools，例如：`E:\AndroidStudioSDK\build-tools\36.1.0`
+- 手动签名输出路径：`android\app\build\outputs\apk\release\app-release-signed.apk`
+- 签名后使用 `apksigner verify --verbose --print-certs android\app\build\outputs\apk\release\app-release-signed.apk` 验证。
+- 如果手机上安装的是 debug 包，安装 signed release 可能因签名不同失败，需要先卸载旧包再安装 release。
 
 ## 产品文案记忆
 
