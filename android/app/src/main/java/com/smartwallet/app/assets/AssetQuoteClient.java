@@ -77,7 +77,9 @@ public class AssetQuoteClient {
 
             JSONObject payload = new JSONObject(matcher.group(1));
             String code = normalizeCode(payload.optString("fundcode", ""));
-            double price = parseDouble(firstNonEmpty(payload.optString("gsz", ""), payload.optString("dwjz", "")));
+            double estimatedPrice = parseDouble(payload.optString("gsz", ""));
+            double confirmedPrice = parseDouble(payload.optString("dwjz", ""));
+            double price = estimatedPrice > 0 ? estimatedPrice : confirmedPrice;
             if (code.isEmpty() || price <= 0) {
                 return null;
             }
@@ -91,6 +93,17 @@ public class AssetQuoteClient {
             safePut(quote, "quoteTime", firstNonEmpty(payload.optString("gztime", ""), payload.optString("jzrq", "")));
             safePut(quote, "source", "eastmoney-fund");
             safePut(quote, "syncedAt", syncedAt);
+            safePut(quote, "priceSource", estimatedPrice > 0 ? "estimated" : "confirmed");
+            if (estimatedPrice > 0) {
+                safePut(quote, "estimatedPrice", estimatedPrice);
+            }
+            if (confirmedPrice > 0) {
+                safePut(quote, "confirmedPrice", confirmedPrice);
+            }
+            String confirmedDate = normalizeDate(payload.optString("jzrq", ""));
+            if (!confirmedDate.isEmpty()) {
+                safePut(quote, "confirmedDate", confirmedDate);
+            }
             return quote;
         } catch (Exception ignored) {
             return null;
@@ -196,6 +209,21 @@ public class AssetQuoteClient {
 
     private String firstNonEmpty(String first, String second) {
         return first != null && !first.isEmpty() ? first : second;
+    }
+
+    private String normalizeDate(String value) {
+        if (value == null || value.isEmpty()) {
+            return "";
+        }
+        String[] parts = value.split("-");
+        if (parts.length != 3) {
+            return value;
+        }
+        return parts[0] + "-" + pad2(parts[1]) + "-" + pad2(parts[2]);
+    }
+
+    private String pad2(String value) {
+        return value.length() == 1 ? "0" + value : value;
     }
 
     private double parseDouble(String value) {

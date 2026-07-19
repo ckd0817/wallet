@@ -83,7 +83,8 @@ public final class CaptureAnalysisParser {
                     parsed.optString("merchantName", ""),
                     parsed.optString("occurredAt", ""),
                     parsed.optString("categoryId", parsed.optString("categoryName", "")),
-                    parsed.optString("note", ""),
+                    parsed.optString("note", parsed.optString("summary", "")),
+                    parsed.optString("pickupCode", ""),
                     parsed.optString("summary", ""),
                     ""
                 ),

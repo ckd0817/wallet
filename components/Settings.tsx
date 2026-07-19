@@ -21,6 +21,7 @@ import { Directory, Encoding, Filesystem } from '@capacitor/filesystem';
 
 import {
   AutoBookkeepingSettings,
+  AppSettings,
   AssetHolding,
   AssetPerformanceSnapshot,
   AssetRecurringPlan,
@@ -47,10 +48,12 @@ interface SettingsProps {
   assetTradeRecords: AssetTradeRecord[];
   llmConfig: LLMConfig;
   autoBookkeepingSettings: AutoBookkeepingSettings;
+  appSettings: AppSettings;
   captureLogs: CaptureAttemptLog[];
   onImport: (data: WalletBackupData, mode: 'append' | 'overwrite') => void;
   onDeleteRecurring: (id: string) => void;
   onUpdateLLMConfig: (config: LLMConfig) => void;
+  onUpdateAppSettings: (settings: AppSettings) => void;
   onOpenAccessibilitySettings: () => Promise<void> | void;
   onTestModelConfig: () => Promise<LLMConfigTestResult> | LLMConfigTestResult;
   onRefreshAutoBookkeepingStatus: () => Promise<void> | void;
@@ -67,10 +70,12 @@ const Settings: React.FC<SettingsProps> = ({
   assetTradeRecords,
   llmConfig,
   autoBookkeepingSettings,
+  appSettings,
   captureLogs,
   onImport,
   onDeleteRecurring,
   onUpdateLLMConfig,
+  onUpdateAppSettings,
   onOpenAccessibilitySettings,
   onTestModelConfig,
   onRefreshAutoBookkeepingStatus,
@@ -768,6 +773,33 @@ const Settings: React.FC<SettingsProps> = ({
               选择 JSON 文件
             </button>
           </div>
+        </div>
+      </section>
+
+      <section>
+        <SectionHeader title="资产统计" />
+        <div className="flex items-center justify-between rounded-[28px] border border-border bg-white px-5 py-5 shadow-sm">
+          <div className="flex items-center gap-4">
+            <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-surface text-primary">
+              <Clock3 className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="text-base font-semibold text-primary">日均支出周期</p>
+              <p className="mt-1 text-xs text-secondary">用于计算不用上班天数</p>
+            </div>
+          </div>
+          <select
+            aria-label="日均支出统计周期"
+            value={appSettings.expenseAverageMonths}
+            onChange={(event) => onUpdateAppSettings({ expenseAverageMonths: Number(event.target.value) })}
+            className="rounded-2xl border border-border bg-surface px-4 py-2.5 text-sm font-semibold text-primary outline-none"
+          >
+            {Array.from({ length: 12 }, (_, index) => index + 1).map((months) => (
+              <option key={months} value={months}>
+                {months === 12 ? '1年' : `${months}个月`}
+              </option>
+            ))}
+          </select>
         </div>
       </section>
 

@@ -58,8 +58,10 @@ public class CaptureLogFactory {
         }
 
         CaptureAnalysisResult result = outcome.getResult();
-        safePut(log, "summary", result.getSummary().isEmpty() ? outcome.getFailureReason() : result.getSummary());
+        String summary = result.getNote().isEmpty() ? result.getSummary() : result.getNote();
+        safePut(log, "summary", summary.isEmpty() ? outcome.getFailureReason() : summary);
         safePut(log, "merchantName", result.getMerchantName());
+        safePut(log, "pickupCode", result.getPickupCode());
         if (result.getAmount() > 0d) {
             safePut(log, "amount", result.getAmount());
         }

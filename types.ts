@@ -17,6 +17,7 @@ export interface Transaction {
   note: string;
   createdBy?: 'manual' | 'recurring' | 'screenshot_capture';
   merchantName?: string;
+  pickupCode?: string;
   sourcePackage?: string;
   needsReview?: boolean;
   captureSummary?: string;
@@ -40,6 +41,7 @@ export interface CaptureAttemptLog {
   transactionId?: string;
   summary?: string;
   merchantName?: string;
+  pickupCode?: string;
   amount?: number;
 }
 
@@ -62,6 +64,8 @@ export type AssetMarket = 'sh' | 'sz' | 'fund';
 export type AssetRecurringFrequency = 'daily' | 'weekly' | 'monthly';
 export type AssetTradeType = 'buy' | 'sell' | 'recurring';
 export type AssetTradeSource = 'manual' | 'recurring';
+export type AssetQuotePriceSource = 'estimated' | 'confirmed';
+export type AssetTradeStatus = 'pending' | 'completed';
 
 export interface AssetHolding {
   id: string;
@@ -84,6 +88,10 @@ export interface AssetQuote {
   quoteTime: string;
   source: string;
   syncedAt: string;
+  priceSource?: AssetQuotePriceSource;
+  estimatedPrice?: number;
+  confirmedPrice?: number;
+  confirmedDate?: string;
   error?: string;
 }
 
@@ -135,11 +143,15 @@ export interface AssetTradeRecord {
   name: string;
   tradeType: AssetTradeType;
   source: AssetTradeSource;
+  status?: AssetTradeStatus;
+  recurringPlanId?: string;
   shares: number;
   amount: number;
   price: number;
   occurredAt: string;
   createdAt: string;
+  settledAt?: string;
+  priceSource?: AssetQuotePriceSource | 'manual';
 }
 
 export interface AssetScreenshotAnalysisResult {
@@ -197,6 +209,10 @@ export interface AutoBookkeepingSettings {
   lastError: string;
 }
 
+export interface AppSettings {
+  expenseAverageMonths: number;
+}
+
 export interface WalletSnapshot {
   storeVersion: number;
   migratedFromWebStorage: boolean;
@@ -210,6 +226,7 @@ export interface WalletSnapshot {
   assetPerformanceHistory: AssetPerformanceSnapshot[];
   assetTradeRecords: AssetTradeRecord[];
   llmConfig: LLMConfig;
+  appSettings: AppSettings;
   autoBookkeepingSettings: AutoBookkeepingSettings;
 }
 

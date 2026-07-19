@@ -15,17 +15,18 @@ public class CaptureAnalysisParserTest {
             "{\\\"transactionType\\\":\\\"expense\\\",\\\"amount\\\":23.45," +
             "\\\"merchantName\\\":\\\"测试咖啡\\\",\\\"occurredAt\\\":\\\"2026-04-05\\\"," +
             "\\\"categoryId\\\":\\\"food\\\",\\\"note\\\":\\\"拿铁\\\"," +
-            "\\\"summary\\\":\\\"微信支付成功，金额23.45元\\\"}\\n```\"}}]}";
+            "\\\"pickupCode\\\":\\\"A102\\\"}\\n```\"}}]}";
 
         CaptureAnalysisOutcome outcome = CaptureAnalysisParser.parseChatResponse(response);
         CaptureAnalysisResult result = outcome.getResult();
 
         assertTrue(result.isSupported());
         assertEquals("", outcome.getFailureReason());
-        assertEquals("微信支付成功，金额23.45元", outcome.getAssistantReplyParsed().optString("summary"));
+        assertEquals("A102", outcome.getAssistantReplyParsed().optString("pickupCode"));
         assertEquals("expense", result.getTransactionType());
         assertEquals(23.45d, result.getAmount(), 0.001d);
         assertEquals("food", result.getCategoryId());
+        assertEquals("A102", result.getPickupCode());
     }
 
     @Test
@@ -40,6 +41,8 @@ public class CaptureAnalysisParserTest {
         assertEquals("income", result.getTransactionType());
         assertEquals(88.8d, result.getAmount(), 0.001d);
         assertEquals("other_inc", result.getCategoryId());
+        assertEquals("原路退款", result.getNote());
+        assertEquals("退款到账 88.8 元", result.getSummary());
     }
 
     @Test

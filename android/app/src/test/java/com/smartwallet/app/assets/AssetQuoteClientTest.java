@@ -22,6 +22,10 @@ public class AssetQuoteClientTest {
         assertEquals("华夏成长混合", quote.optString("name"));
         assertEquals(1.4461d, quote.optDouble("price"), 0.0001d);
         assertEquals(2.78d, quote.optDouble("changePercent"), 0.0001d);
+        assertEquals("estimated", quote.optString("priceSource"));
+        assertEquals(1.4461d, quote.optDouble("estimatedPrice"), 0.0001d);
+        assertEquals(1.4070d, quote.optDouble("confirmedPrice"), 0.0001d);
+        assertEquals("2026-06-17", quote.optString("confirmedDate"));
     }
 
     @Test

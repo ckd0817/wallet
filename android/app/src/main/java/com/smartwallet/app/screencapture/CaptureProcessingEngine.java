@@ -107,12 +107,23 @@ public final class CaptureProcessingEngine {
         safePut(transaction, "note", result.getNote().isEmpty() ? result.getMerchantName() : result.getNote());
         safePut(transaction, "createdBy", "screenshot_capture");
         safePut(transaction, "merchantName", result.getMerchantName());
+        safePut(transaction, "pickupCode", result.getPickupCode());
         safePut(transaction, "sourcePackage", "screen_capture");
         safePut(transaction, "needsReview", true);
-        safePut(transaction, "captureSummary", result.getSummary());
+        safePut(transaction, "captureSummary", resolveCaptureSummary(result));
         safePut(transaction, "createdAt", formatTimestamp(now));
         safePut(transaction, "updatedAt", formatTimestamp(now));
         return transaction;
+    }
+
+    private String resolveCaptureSummary(CaptureAnalysisResult result) {
+        if (!result.getNote().isEmpty()) {
+            return result.getNote();
+        }
+        if (!result.getSummary().isEmpty()) {
+            return result.getSummary();
+        }
+        return result.getMerchantName();
     }
 
 

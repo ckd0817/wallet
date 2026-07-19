@@ -27,11 +27,13 @@ public class CaptureAnalysisClient {
         "你只能识别两种交易类型：expense 或 income。\n" +
         "付款成功、消费支出、扣款成功等记为 expense。\n" +
         "收款到账、退款到账、报销到账等记为 income。\n" +
-        "如果截图不足以确认是一笔有效入账记录，或者无法确认金额，就仍然只返回 JSON，并将 amount 设为 0，categoryId 设为空字符串，summary 写明原因。\n" +
+        "note 只写一条简短备注，包含原来需要放在摘要里的关键信息，不要再额外输出 summary。\n" +
+        "如果截图里出现取餐号、取餐码、餐号、柜号、口令等用于取餐的号码或短码，写入 pickupCode；没有就写空字符串。\n" +
+        "如果截图不足以确认是一笔有效入账记录，或者无法确认金额，就仍然只返回 JSON，并将 amount 设为 0，categoryId 设为空字符串，note 写明原因。\n" +
         "如果截图里同时出现多笔支出记录，优先记录最新的一条，不要同时输出两条或多条记录。\n" +
         "如果 transactionType=expense，categoryId 必须且只能从这些支出分类中选择：{{expense_categories}}。\n" +
         "如果 transactionType=income，categoryId 必须且只能从这些收入分类中选择：{{income_categories}}。\n" +
-        "只返回 JSON，不要输出 Markdown、解释或额外文本。返回格式固定为 {\"transactionType\":\"expense|income\",\"amount\":number,\"merchantName\":\"...\",\"occurredAt\":\"YYYY-MM-DD\",\"categoryId\":\"...\",\"note\":\"...\",\"summary\":\"...\"}。";
+        "只返回 JSON，不要输出 Markdown、解释或额外文本。返回格式固定为 {\"transactionType\":\"expense|income\",\"amount\":number,\"merchantName\":\"...\",\"occurredAt\":\"YYYY-MM-DD\",\"categoryId\":\"...\",\"note\":\"...\",\"pickupCode\":\"...\"}。";
     private static final String CONNECTIVITY_TEST_SYSTEM_PROMPT =
         "你是模型连通性测试助手。当前请求仅用于测试接口是否能正常返回内容。请直接回复一句简短中文，不要输出 JSON、Markdown 或解释。";
     private static final String CONNECTIVITY_TEST_USER_PROMPT =

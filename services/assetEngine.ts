@@ -42,6 +42,7 @@ export interface AssetRecurringExecution {
   plan: AssetRecurringPlan;
   addedShares: number;
   executionDate?: string;
+  priceSource?: AssetQuote['priceSource'];
 }
 
 export const normalizeAssetCode = (code: string) => code.trim().replace(/\D/g, '').slice(0, 6);
@@ -50,6 +51,7 @@ const normalizeAmount = (value: unknown) =>
   typeof value === 'number' && Number.isFinite(value) ? Math.max(0, value) : 0;
 
 const DISTRIBUTION_COLORS = ['#ef4444', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#06b6d4'];
+const DELAYED_SETTLEMENT_FUND_PATTERN = /qdii|纳斯达克|nasdaq/i;
 
 export const inferAssetMarket = (assetType: AssetType, code: string): AssetMarket => {
   if (assetType === 'fund') {
@@ -58,6 +60,9 @@ export const inferAssetMarket = (assetType: AssetType, code: string): AssetMarke
   const normalized = normalizeAssetCode(code);
   return normalized.startsWith('6') || normalized.startsWith('5') ? 'sh' : 'sz';
 };
+
+export const isDelayedSettlementFund = (holding: Pick<AssetHolding, 'assetType' | 'name'>) =>
+  holding.assetType === 'fund' && DELAYED_SETTLEMENT_FUND_PATTERN.test(holding.name);
 
 export const calculateNextAssetRecurringDate = (dateStr: string, frequency: AssetRecurringFrequency): string => {
   const date = new Date(dateStr);
@@ -184,6 +189,16 @@ export const normalizeAssetQuote = (quote: Partial<AssetQuote>): AssetQuote | nu
     quoteTime: typeof quote.quoteTime === 'string' ? quote.quoteTime : '',
     source: typeof quote.source === 'string' && quote.source ? quote.source : 'unknown',
     syncedAt: typeof quote.syncedAt === 'string' && quote.syncedAt ? quote.syncedAt : new Date().toISOString(),
+    priceSource: quote.priceSource === 'confirmed' ? 'confirmed' : quote.priceSource === 'estimated' ? 'estimated' : undefined,
+    estimatedPrice:
+      typeof quote.estimatedPrice === 'number' && Number.isFinite(quote.estimatedPrice)
+        ? Math.max(0, quote.estimatedPrice)
+        : undefined,
+    confirmedPrice:
+      typeof quote.confirmedPrice === 'number' && Number.isFinite(quote.confirmedPrice)
+        ? Math.max(0, quote.confirmedPrice)
+        : undefined,
+    confirmedDate: typeof quote.confirmedDate === 'string' && quote.confirmedDate ? quote.confirmedDate : undefined,
     error: typeof quote.error === 'string' && quote.error ? quote.error : undefined,
   };
 };
@@ -246,6 +261,51 @@ export const getAssetQuoteDate = (quote?: Pick<AssetQuote, 'quoteTime' | 'synced
   return typeof quote.syncedAt === 'string' && quote.syncedAt ? quote.syncedAt.split('T')[0] : '';
 };
 
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+const daysBetweenUtc = (later: string, earlier: string) => {
+  const laterDate = new Date(`${later}T12:00:00Z`);
+  const earlierDate = new Date(`${earlier}T12:00:00Z`);
+  return Math.floor((laterDate.getTime() - earlierDate.getTime()) / MS_PER_DAY);
+};
+
+const isWeekend = (dateStr: string) => {
+  const day = new Date(`${dateStr}T12:00:00Z`).getUTCDay();
+  return day === 0 || day === 6;
+};
+
+export const isLikelyMarketOpenForHolding = (
+  today: string,
+  quote: Pick<AssetQuote, 'quoteTime' | 'syncedAt'> | null | undefined,
+  holding: Pick<AssetHolding, 'assetType' | 'name'>,
+): boolean => {
+  if (isWeekend(today)) {
+    return false;
+  }
+
+  const quoteDate = getAssetQuoteDate(quote);
+  if (!quoteDate) {
+    return true;
+  }
+
+  const daysLag = daysBetweenUtc(today, quoteDate);
+  if (daysLag < 0) {
+    return true;
+  }
+
+  return isDelayedSettlementFund(holding) ? daysLag <= 3 : daysLag <= 1;
+};
+
+export const getAssetQuoteConfirmedDate = (quote?: Pick<AssetQuote, 'confirmedDate' | 'quoteTime' | 'syncedAt' | 'priceSource'> | null) => {
+  if (!quote) {
+    return '';
+  }
+  if (quote.confirmedDate && /^\d{4}-\d{2}-\d{2}$/.test(quote.confirmedDate)) {
+    return quote.confirmedDate;
+  }
+  return quote.priceSource === 'confirmed' ? getAssetQuoteDate(quote) : '';
+};
+
 export const parseFundQuoteResponse = (content: string, syncedAt = new Date().toISOString()): AssetQuote | null => {
   const match = content.match(/jsonpgz\((.*)\);?/);
   if (!match) {
@@ -255,10 +315,17 @@ export const parseFundQuoteResponse = (content: string, syncedAt = new Date().to
   try {
     const payload = JSON.parse(match[1]) as Record<string, string>;
     const code = normalizeAssetCode(payload.fundcode ?? '');
-    const price = Number(payload.gsz || payload.dwjz || 0);
+    const estimatedPrice = Number(payload.gsz || 0);
+    const confirmedPrice = Number(payload.dwjz || 0);
+    const hasEstimatedPrice = Number.isFinite(estimatedPrice) && estimatedPrice > 0;
+    const hasConfirmedPrice = Number.isFinite(confirmedPrice) && confirmedPrice > 0;
+    const price = hasEstimatedPrice ? estimatedPrice : hasConfirmedPrice ? confirmedPrice : 0;
     if (!code || !Number.isFinite(price) || price <= 0) {
       return null;
     }
+    const confirmedDate = payload.jzrq && /^\d{4}-\d{1,2}-\d{1,2}$/.test(payload.jzrq)
+      ? payload.jzrq.replace(/-(\d)(?=-|$)/g, '-0$1')
+      : undefined;
     return {
       assetType: 'fund',
       code,
@@ -268,6 +335,10 @@ export const parseFundQuoteResponse = (content: string, syncedAt = new Date().to
       quoteTime: payload.gztime || payload.jzrq || '',
       source: 'eastmoney-fund',
       syncedAt,
+      priceSource: hasEstimatedPrice ? 'estimated' : 'confirmed',
+      estimatedPrice: hasEstimatedPrice ? estimatedPrice : undefined,
+      confirmedPrice: hasConfirmedPrice ? confirmedPrice : undefined,
+      confirmedDate,
     };
   } catch {
     return null;

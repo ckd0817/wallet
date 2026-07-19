@@ -7,6 +7,7 @@ import {
   buildAssetPerformanceSnapshot,
   buildAssetPositions,
   calculateNextAssetRecurringDate,
+  isLikelyMarketOpenForHolding,
   mergeAssetPerformanceHistory,
   normalizeAssetImportCandidate,
   parseFundQuoteResponse,
@@ -28,6 +29,10 @@ describe('assetEngine', () => {
       name: '华夏成长混合',
       price: 1.4461,
       changePercent: 2.78,
+      priceSource: 'estimated',
+      estimatedPrice: 1.4461,
+      confirmedPrice: 1.407,
+      confirmedDate: '2026-06-17',
     });
   });
 
@@ -387,5 +392,65 @@ describe('assetEngine', () => {
 
     expect(distribution[0]).toMatchObject({ name: 'A基金', value: 200 });
     expect(distribution[0].percent).toBeCloseTo(66.67, 2);
+  });
+});
+
+describe('isLikelyMarketOpenForHolding', () => {
+  const qdiiHolding = { assetType: 'fund' as const, name: '南方纳斯达克100指数发起(QDII)A' };
+  const domesticFund = { assetType: 'fund' as const, name: '鹏华丰享债券' };
+  const quoteAt = (quoteTime: string) => ({ quoteTime, syncedAt: '2026-07-03T12:00:00.000Z' });
+
+  describe('QDII 基金', () => {
+    it('周末跳过（周六/周日）', () => {
+      expect(isLikelyMarketOpenForHolding('2026-07-04', quoteAt('2026-07-03 04:00'), qdiiHolding)).toBe(false);
+      expect(isLikelyMarketOpenForHolding('2026-07-05', quoteAt('2026-07-03 04:00'), qdiiHolding)).toBe(false);
+    });
+
+    it('工作日且 quoteDate=today（盘后已更新）放行', () => {
+      expect(isLikelyMarketOpenForHolding('2026-07-03', quoteAt('2026-07-03 04:00'), qdiiHolding)).toBe(true);
+    });
+
+    it('工作日且 quoteDate=today−1（美东时差，盘前）放行', () => {
+      expect(isLikelyMarketOpenForHolding('2026-07-03', quoteAt('2026-07-02 04:00'), qdiiHolding)).toBe(true);
+    });
+
+    it('工作日且 quoteDate=today−3（T+1 + 周末）放行', () => {
+      expect(isLikelyMarketOpenForHolding('2026-07-06', quoteAt('2026-07-03 04:00'), qdiiHolding)).toBe(true);
+    });
+
+    it('工作日且 quoteDate=today−4（节假日堆积）跳过', () => {
+      expect(isLikelyMarketOpenForHolding('2026-07-07', quoteAt('2026-07-03 04:00'), qdiiHolding)).toBe(false);
+    });
+
+    it('quote 为空放行（保守）', () => {
+      expect(isLikelyMarketOpenForHolding('2026-07-03', null, qdiiHolding)).toBe(true);
+    });
+
+    it('quoteTime 为空放行（保守）', () => {
+      expect(isLikelyMarketOpenForHolding('2026-07-03', { quoteTime: '', syncedAt: '' }, qdiiHolding)).toBe(true);
+    });
+  });
+
+  describe('境内基金/ETF', () => {
+    it('周末跳过', () => {
+      expect(isLikelyMarketOpenForHolding('2026-07-04', quoteAt('2026-07-03 15:00'), domesticFund)).toBe(false);
+    });
+
+    it('工作日且 quoteDate=today（盘后已更新）放行', () => {
+      expect(isLikelyMarketOpenForHolding('2026-07-03', quoteAt('2026-07-03 15:00'), domesticFund)).toBe(true);
+    });
+
+    it('工作日且 quoteDate=today−1（盘前还没出今日估值）放行', () => {
+      expect(isLikelyMarketOpenForHolding('2026-07-03', quoteAt('2026-07-02 15:00'), domesticFund)).toBe(true);
+    });
+
+    it('工作日且 quoteDate=today−2（A 股节假日，接口没更新）跳过', () => {
+      expect(isLikelyMarketOpenForHolding('2026-07-06', quoteAt('2026-07-03 15:00'), domesticFund)).toBe(false);
+    });
+  });
+
+  it('QDII 周末优先级高于 daysLag 判断', () => {
+    // 即使 quoteDate=today（理论上更新过），周六仍然跳过
+    expect(isLikelyMarketOpenForHolding('2026-07-04', quoteAt('2026-07-04 04:00'), qdiiHolding)).toBe(false);
   });
 });

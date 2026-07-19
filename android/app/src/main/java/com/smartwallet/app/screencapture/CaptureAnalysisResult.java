@@ -9,6 +9,7 @@ public class CaptureAnalysisResult {
     private final String occurredAt;
     private final String categoryId;
     private final String note;
+    private final String pickupCode;
     private final String summary;
     private final String errorMessage;
 
@@ -20,6 +21,7 @@ public class CaptureAnalysisResult {
         String occurredAt,
         String categoryId,
         String note,
+        String pickupCode,
         String summary,
         String errorMessage
     ) {
@@ -30,12 +32,13 @@ public class CaptureAnalysisResult {
         this.occurredAt = occurredAt == null ? "" : occurredAt;
         this.categoryId = categoryId == null ? "" : categoryId;
         this.note = note == null ? "" : note;
+        this.pickupCode = pickupCode == null ? "" : pickupCode;
         this.summary = summary == null ? "" : summary;
         this.errorMessage = errorMessage == null ? "" : errorMessage;
     }
 
     public static CaptureAnalysisResult unsupported(String errorMessage) {
-        return new CaptureAnalysisResult(false, "", 0d, "", "", "", "", "", errorMessage);
+        return new CaptureAnalysisResult(false, "", 0d, "", "", "", "", "", "", errorMessage);
     }
 
     public CaptureAnalysisResult withCategoryId(String nextCategoryId) {
@@ -47,6 +50,7 @@ public class CaptureAnalysisResult {
             occurredAt,
             nextCategoryId,
             note,
+            pickupCode,
             summary,
             errorMessage
         );
@@ -78,6 +82,10 @@ public class CaptureAnalysisResult {
 
     public String getNote() {
         return note;
+    }
+
+    public String getPickupCode() {
+        return pickupCode;
     }
 
     public String getSummary() {

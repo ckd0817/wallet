@@ -3,6 +3,7 @@ import { Capacitor, PluginListenerHandle, registerPlugin } from '@capacitor/core
 import { DEFAULT_CATEGORIES, mergeDefaultCategories } from '../constants';
 import {
   AutoBookkeepingSettings,
+  AppSettings,
   AssetHolding,
   AssetPerformanceSnapshot,
   AssetQuote,
@@ -37,6 +38,7 @@ const STORAGE_KEYS = {
   assetPerformanceHistory: 'smartwallet_asset_performance_history',
   assetTradeRecords: 'smartwallet_asset_trade_records',
   llmConfig: 'smartwallet_llm_config',
+  appSettings: 'smartwallet_app_settings',
   autoBookkeepingSettings: 'smartwallet_auto_bookkeeping',
 } as const;
 
@@ -96,7 +98,7 @@ const PREVIOUS_DEFAULT_CAPTURE_PROMPT = [
   '只返回 JSON，不要输出 Markdown、解释或额外文本。返回格式固定为 {"transactionType":"expense|income","amount":number,"merchantName":"...","occurredAt":"YYYY-MM-DD","categoryId":"...","note":"...","summary":"..."}。',
 ].join('\n');
 
-export const DEFAULT_CAPTURE_PROMPT = [
+const SUMMARY_CAPTURE_PROMPT = [
   '你正在分析一张付款、收款或退款结果截图。',
   '今天的本地日期是 {{today_date}}。在推断 occurredAt 时优先使用这个日期；只有截图里明确出现其他日期时，才使用截图中的日期。',
   '你只能识别两种交易类型：expense 或 income。',
@@ -107,6 +109,21 @@ export const DEFAULT_CAPTURE_PROMPT = [
   '如果 transactionType=expense，categoryId 必须且只能从这些支出分类中选择：{{expense_categories}}。',
   '如果 transactionType=income，categoryId 必须且只能从这些收入分类中选择：{{income_categories}}。',
   '只返回 JSON，不要输出 Markdown、解释或额外文本。返回格式固定为 {"transactionType":"expense|income","amount":number,"merchantName":"...","occurredAt":"YYYY-MM-DD","categoryId":"...","note":"...","summary":"..."}。',
+].join('\n');
+
+export const DEFAULT_CAPTURE_PROMPT = [
+  '你正在分析一张付款、收款或退款结果截图。',
+  '今天的本地日期是 {{today_date}}。在推断 occurredAt 时优先使用这个日期；只有截图里明确出现其他日期时，才使用截图中的日期。',
+  '你只能识别两种交易类型：expense 或 income。',
+  '付款成功、消费支出、扣款成功等记为 expense。',
+  '收款到账、退款到账、报销到账等记为 income。',
+  'note 只写一条简短备注，包含原来需要放在摘要里的关键信息，不要再额外输出 summary。',
+  '如果截图里出现取餐号、取餐码、餐号、柜号、口令等用于取餐的号码或短码，写入 pickupCode；没有就写空字符串。',
+  '如果截图不足以确认是一笔有效入账记录，或者无法确认金额，就仍然只返回 JSON，并将 amount 设为 0，categoryId 设为空字符串，note 写明原因。',
+  '如果截图里同时出现多笔支出记录，优先记录最新的一条，不要同时输出两条或多条记录。',
+  '如果 transactionType=expense，categoryId 必须且只能从这些支出分类中选择：{{expense_categories}}。',
+  '如果 transactionType=income，categoryId 必须且只能从这些收入分类中选择：{{income_categories}}。',
+  '只返回 JSON，不要输出 Markdown、解释或额外文本。返回格式固定为 {"transactionType":"expense|income","amount":number,"merchantName":"...","occurredAt":"YYYY-MM-DD","categoryId":"...","note":"...","pickupCode":"..."}。',
 ].join('\n');
 
 export const defaultLlmConfig = (): LLMConfig => ({
@@ -124,6 +141,10 @@ export const defaultAutoBookkeepingSettings = (): AutoBookkeepingSettings => ({
   lastError: '',
 });
 
+export const defaultAppSettings = (): AppSettings => ({
+  expenseAverageMonths: 1,
+});
+
 export const buildDefaultSnapshot = (): WalletSnapshot => ({
   storeVersion: 1,
   migratedFromWebStorage: false,
@@ -137,6 +158,7 @@ export const buildDefaultSnapshot = (): WalletSnapshot => ({
   assetPerformanceHistory: [],
   assetTradeRecords: [],
   llmConfig: defaultLlmConfig(),
+  appSettings: defaultAppSettings(),
   autoBookkeepingSettings: defaultAutoBookkeepingSettings(),
 });
 
@@ -155,7 +177,9 @@ const normalizeLlmConfig = (llmConfig?: Partial<LLMConfig> | null): LLMConfig =>
     modelName: typeof merged.modelName === 'string' ? merged.modelName : defaults.modelName,
     timeoutMs: typeof merged.timeoutMs === 'number' ? merged.timeoutMs : defaults.timeoutMs,
     capturePrompt:
-      normalizedCapturePrompt === LEGACY_CAPTURE_PROMPT || normalizedCapturePrompt === PREVIOUS_DEFAULT_CAPTURE_PROMPT
+      normalizedCapturePrompt === LEGACY_CAPTURE_PROMPT ||
+      normalizedCapturePrompt === PREVIOUS_DEFAULT_CAPTURE_PROMPT ||
+      normalizedCapturePrompt === SUMMARY_CAPTURE_PROMPT
         ? DEFAULT_CAPTURE_PROMPT
         : capturePrompt,
   };
@@ -222,6 +246,8 @@ const normalizeAssetTradeRecords = (assetTradeRecords?: AssetTradeRecord[] | nul
                 ? record.tradeType
                 : 'buy',
             source: record.source === 'recurring' ? 'recurring' : 'manual',
+            status: record.status === 'pending' ? 'pending' : 'completed',
+            recurringPlanId: typeof record.recurringPlanId === 'string' && record.recurringPlanId ? record.recurringPlanId : undefined,
             shares,
             amount,
             price:
@@ -234,6 +260,12 @@ const normalizeAssetTradeRecords = (assetTradeRecords?: AssetTradeRecord[] | nul
               typeof record.occurredAt === 'string' && record.occurredAt ? record.occurredAt : new Date().toISOString(),
             createdAt:
               typeof record.createdAt === 'string' && record.createdAt ? record.createdAt : new Date().toISOString(),
+            settledAt:
+              typeof record.settledAt === 'string' && record.settledAt ? record.settledAt : undefined,
+            priceSource:
+              record.priceSource === 'estimated' || record.priceSource === 'confirmed' || record.priceSource === 'manual'
+                ? record.priceSource
+                : undefined,
           } satisfies AssetTradeRecord;
         })
         .sort((left, right) => new Date(right.occurredAt).getTime() - new Date(left.occurredAt).getTime())
@@ -254,6 +286,14 @@ const normalizeAutoBookkeepingSettings = (
         : defaults.notificationPermissionGranted,
     lastCaptureAt: typeof merged.lastCaptureAt === 'number' ? merged.lastCaptureAt : defaults.lastCaptureAt,
     lastError: typeof merged.lastError === 'string' ? merged.lastError : defaults.lastError,
+  };
+};
+
+const normalizeAppSettings = (appSettings?: Partial<AppSettings> | Record<string, unknown> | null): AppSettings => {
+  const months = appSettings?.expenseAverageMonths;
+  return {
+    expenseAverageMonths:
+      typeof months === 'number' && Number.isInteger(months) ? Math.min(12, Math.max(1, months)) : 1,
   };
 };
 
@@ -290,6 +330,7 @@ export const loadWebSnapshot = (): WalletSnapshot => {
     ),
     assetTradeRecords: normalizeAssetTradeRecords(parseStoredValue<AssetTradeRecord[]>(STORAGE_KEYS.assetTradeRecords, [])),
     llmConfig: normalizeLlmConfig(parseStoredValue<Partial<LLMConfig>>(STORAGE_KEYS.llmConfig, {})),
+    appSettings: normalizeAppSettings(parseStoredValue<Record<string, unknown>>(STORAGE_KEYS.appSettings, {})),
     autoBookkeepingSettings: normalizeAutoBookkeepingSettings(
       parseStoredValue<Record<string, unknown>>(STORAGE_KEYS.autoBookkeepingSettings, {}),
     ),
@@ -307,6 +348,7 @@ export const saveWebSnapshot = (snapshot: WalletSnapshot) => {
   localStorage.setItem(STORAGE_KEYS.assetPerformanceHistory, JSON.stringify(snapshot.assetPerformanceHistory));
   localStorage.setItem(STORAGE_KEYS.assetTradeRecords, JSON.stringify(snapshot.assetTradeRecords));
   localStorage.setItem(STORAGE_KEYS.llmConfig, JSON.stringify(snapshot.llmConfig));
+  localStorage.setItem(STORAGE_KEYS.appSettings, JSON.stringify(snapshot.appSettings));
   localStorage.setItem(STORAGE_KEYS.autoBookkeepingSettings, JSON.stringify(snapshot.autoBookkeepingSettings));
 };
 
@@ -336,6 +378,7 @@ export const normalizeSnapshot = (snapshot?: Partial<WalletSnapshot> | null): Wa
     ),
     assetTradeRecords: normalizeAssetTradeRecords(snapshot?.assetTradeRecords ?? defaults.assetTradeRecords),
     llmConfig: normalizeLlmConfig(snapshot?.llmConfig ?? {}),
+    appSettings: normalizeAppSettings(snapshot?.appSettings ?? {}),
     autoBookkeepingSettings: normalizeAutoBookkeepingSettings(snapshot?.autoBookkeepingSettings ?? {}),
   };
 };

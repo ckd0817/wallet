@@ -19,6 +19,12 @@ describe('DEFAULT_CAPTURE_PROMPT', () => {
     expect(DEFAULT_CAPTURE_PROMPT).toContain('如果截图里同时出现多笔支出记录，优先记录最新的一条，不要同时输出两条或多条记录。');
   });
 
+  it('使用取餐码替代截图摘要字段', () => {
+    expect(DEFAULT_CAPTURE_PROMPT).toContain('pickupCode');
+    expect(DEFAULT_CAPTURE_PROMPT).toContain('不要再额外输出 summary');
+    expect(DEFAULT_CAPTURE_PROMPT).not.toContain('"summary":"..."');
+  });
+
   it('会把旧默认提示词迁移到新版本', () => {
     const snapshot = normalizeSnapshot({
       llmConfig: {

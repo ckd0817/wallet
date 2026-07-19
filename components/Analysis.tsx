@@ -32,13 +32,16 @@ import {
   buildAssetSummary,
   AssetCostSource,
   inferAssetMarket,
+  isDelayedSettlementFund,
   mergeAssetPerformanceHistory,
   normalizeAssetCode,
   normalizeAssetImportCandidate,
 } from '../services/assetEngine';
+import { calculateWealthFreedom } from '../services/wealthFreedom';
 
 interface AnalysisProps {
   transactions: Transaction[];
+  expenseAverageMonths: number;
   assetHoldings: AssetHolding[];
   assetQuoteCache: AssetQuote[];
   assetRecurringPlans: AssetRecurringPlan[];
@@ -81,8 +84,6 @@ const recurringFrequencyOptions: { value: AssetRecurringFrequency; label: string
   { value: 'monthly', label: '每月' },
 ];
 
-const RECENT_EXPENSE_DAYS = 30;
-
 const readOptionalAmount = (value: string) => {
   const normalized = value.trim();
   if (!normalized) {
@@ -90,39 +91,6 @@ const readOptionalAmount = (value: string) => {
   }
   const amount = Number(normalized);
   return Number.isFinite(amount) ? amount : Number.NaN;
-};
-
-const calculateWealthFreedomDays = (totalAssets: number, transactions: Transaction[]) => {
-  const end = new Date();
-  end.setDate(end.getDate() - 1);
-  end.setHours(23, 59, 59, 999);
-  const start = new Date(end);
-  start.setDate(end.getDate() - RECENT_EXPENSE_DAYS + 1);
-  start.setHours(0, 0, 0, 0);
-
-  const recentExpense = transactions
-    .filter((transaction) => {
-      if (transaction.type !== 'expense') {
-        return false;
-      }
-      const transactionDate = new Date(transaction.date);
-      return transactionDate >= start && transactionDate <= end;
-    })
-    .reduce((sum, transaction) => sum + transaction.amount, 0);
-  const avgDailyExpense = recentExpense / RECENT_EXPENSE_DAYS;
-
-  if (avgDailyExpense <= 0) {
-    return {
-      display: '暂无',
-      subValue: '近30天无支出',
-    };
-  }
-
-  const days = Math.max(0, totalAssets / avgDailyExpense);
-  return {
-    display: formatFreedomDays(days),
-    subValue: `日均 ¥${avgDailyExpense.toFixed(2)}`,
-  };
 };
 
 const formatFreedomDays = (days: number) => {
@@ -134,6 +102,7 @@ const formatFreedomDays = (days: number) => {
 
 const Analysis: React.FC<AnalysisProps> = ({
   transactions,
+  expenseAverageMonths,
   assetHoldings,
   assetQuoteCache,
   assetRecurringPlans,
@@ -156,7 +125,6 @@ const Analysis: React.FC<AnalysisProps> = ({
   const [isAnalyzingImage, setIsAnalyzingImage] = useState(false);
   const [importCandidates, setImportCandidates] = useState<AssetImportCandidate[]>([]);
   const [operationType, setOperationType] = useState<AssetOperationType>('buy');
-  const [operationShares, setOperationShares] = useState('');
   const [operationAmount, setOperationAmount] = useState('');
   const [recurringAmount, setRecurringAmount] = useState('');
   const [recurringFrequency, setRecurringFrequency] = useState<AssetRecurringFrequency>('monthly');
@@ -165,10 +133,11 @@ const Analysis: React.FC<AnalysisProps> = ({
 
   const positions = useMemo(() => buildAssetPositions(assetHoldings, assetQuoteCache), [assetHoldings, assetQuoteCache]);
   const summary = useMemo(() => buildAssetSummary(positions), [positions]);
-  const freedomDays = useMemo(
-    () => calculateWealthFreedomDays(summary.totalMarketValue, transactions),
-    [summary.totalMarketValue, transactions],
+  const freedom = useMemo(
+    () => calculateWealthFreedom(summary.totalMarketValue, transactions, expenseAverageMonths),
+    [summary.totalMarketValue, transactions, expenseAverageMonths],
   );
+  const freedomPeriodLabel = expenseAverageMonths === 12 ? '近1年' : `近${expenseAverageMonths}个月`;
   const displayPerformanceHistory = useMemo(
     () =>
       mergeAssetPerformanceHistory(
@@ -224,7 +193,6 @@ const Analysis: React.FC<AnalysisProps> = ({
     setEditingId('');
     setForm(emptyForm);
     setOperationType('buy');
-    setOperationShares('');
     setOperationAmount('');
     setRecurringAmount('');
     setRecurringFrequency('monthly');
@@ -274,10 +242,60 @@ const Analysis: React.FC<AnalysisProps> = ({
       return;
     }
 
-    const sharesDelta = Number(operationShares || 0);
     const amountDelta = Number(operationAmount || 0);
-    if (sharesDelta <= 0) {
-      alert('请输入份额');
+    if (!Number.isFinite(amountDelta) || amountDelta <= 0) {
+      alert('请输入金额');
+      return;
+    }
+
+    const currentPosition = positions.find((position) => position.holding.id === editingHolding.id);
+    const currentQuote = currentPosition?.quote;
+    const delayedSettlement = isDelayedSettlementFund({
+      ...editingHolding,
+      name: currentQuote?.name || editingHolding.name,
+    });
+
+    if (operationType === 'sell' && currentPosition && amountDelta > currentPosition.marketValue) {
+      alert('金额超出持仓');
+      return;
+    }
+
+    const nextPayload = {
+      assetType: editingHolding.assetType,
+      code: editingHolding.code,
+      market: editingHolding.market,
+      name: editingHolding.name,
+      shares: editingHolding.shares,
+      costAmount: editingHolding.costAmount,
+    };
+
+    if (delayedSettlement) {
+      await onUpdateAssetHolding(editingHolding.id, nextPayload, {
+        holdingId: editingHolding.id,
+        assetType: editingHolding.assetType,
+        code: editingHolding.code,
+        name: currentQuote?.name || editingHolding.name,
+        tradeType: operationType,
+        source: 'manual',
+        status: 'pending',
+        shares: 0,
+        amount: amountDelta,
+        price: 0,
+        occurredAt: new Date().toISOString(),
+      });
+      setOperationAmount('');
+      return;
+    }
+
+    const price = currentQuote?.price ?? 0;
+    if (!Number.isFinite(price) || price <= 0) {
+      alert('暂无成交价');
+      return;
+    }
+
+    const sharesDelta = amountDelta / price;
+    if (!Number.isFinite(sharesDelta) || sharesDelta <= 0) {
+      alert('暂无成交价');
       return;
     }
 
@@ -293,35 +311,31 @@ const Analysis: React.FC<AnalysisProps> = ({
       nextShares = editingHolding.shares - sharesDelta;
       nextCostAmount = nextShares <= 0 ? 0 : Math.max(0, editingHolding.costAmount - averageCost * sharesDelta);
     } else {
-      if (amountDelta <= 0) {
-        alert('请输入金额');
-        return;
-      }
       nextShares = editingHolding.shares + sharesDelta;
       nextCostAmount = editingHolding.costAmount + amountDelta;
     }
 
-    const nextPayload = {
-      assetType: editingHolding.assetType,
-      code: editingHolding.code,
-      market: editingHolding.market,
-      name: editingHolding.name,
+    const completedPayload = {
+      ...nextPayload,
+      name: currentQuote?.name || editingHolding.name,
       shares: nextShares,
       costAmount: nextCostAmount,
     };
 
-    const operationAmountValue = operationType === 'sell' ? Math.max(0, editingHolding.costAmount - nextCostAmount) : amountDelta;
-    await onUpdateAssetHolding(editingHolding.id, nextPayload, {
+    await onUpdateAssetHolding(editingHolding.id, completedPayload, {
       holdingId: editingHolding.id,
       assetType: editingHolding.assetType,
       code: editingHolding.code,
-      name: editingHolding.name,
+      name: currentQuote?.name || editingHolding.name,
       tradeType: operationType,
       source: 'manual',
+      status: 'completed',
       shares: sharesDelta,
-      amount: operationAmountValue,
-      price: sharesDelta > 0 ? operationAmountValue / sharesDelta : 0,
+      amount: amountDelta,
+      price,
+      priceSource: currentQuote?.priceSource ?? 'manual',
       occurredAt: new Date().toISOString(),
+      settledAt: new Date().toISOString(),
     });
     setForm((previous) => ({
       ...previous,
@@ -329,7 +343,6 @@ const Analysis: React.FC<AnalysisProps> = ({
       costAmount: String(Number(nextCostAmount.toFixed(2))),
       averageCost: '',
     }));
-    setOperationShares('');
     setOperationAmount('');
   };
 
@@ -406,7 +419,11 @@ const Analysis: React.FC<AnalysisProps> = ({
           value={`¥${summary.dailyChangeAmount.toFixed(2)}`}
           tone={summary.dailyChangeAmount >= 0 ? 'positive' : 'negative'}
         />
-        <SummaryCard label="不用上班天数" value={freedomDays.display} subValue={freedomDays.subValue} />
+        <SummaryCard
+          label="不用上班天数"
+          value={freedom.days === null ? '暂无' : formatFreedomDays(freedom.days)}
+          subValue={freedom.days === null ? `${freedomPeriodLabel}无支出` : `${freedomPeriodLabel} · 日均 ¥${freedom.avgDailyExpense.toFixed(2)}`}
+        />
       </div>
 
       <div className="grid grid-cols-4 gap-2">
@@ -573,20 +590,21 @@ const Analysis: React.FC<AnalysisProps> = ({
                       </button>
                     ))}
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <Field label="调整份额" value={operationShares} onChange={setOperationShares} inputMode="decimal" />
-                    {operationType === 'sell' ? (
-                      <div className="flex flex-col justify-end pb-3 text-xs text-secondary">按平均成本扣减</div>
-                    ) : (
-                      <Field label="调整金额" value={operationAmount} onChange={setOperationAmount} inputMode="decimal" />
-                    )}
-                  </div>
+                  <Field
+                    label={operationType === 'sell' ? '减仓金额' : '加仓金额'}
+                    value={operationAmount}
+                    onChange={setOperationAmount}
+                    inputMode="decimal"
+                  />
+                  {isDelayedSettlementFund(editingHolding) && (
+                    <p className="text-xs text-secondary">QDII 待确认净值</p>
+                  )}
                   <button
                     type="button"
                     onClick={applyAssetOperation}
                     className="h-10 w-full rounded-xl bg-white border border-border text-sm font-semibold text-primary"
                   >
-                    同步持仓
+                    {operationType === 'sell' ? '确认减仓' : '确认加仓'}
                   </button>
                 </div>
               )}
@@ -755,6 +773,7 @@ const TradeRecordsPanel = ({ records, onClose }: { records: AssetTradeRecord[]; 
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
                       <span className={`text-xs font-semibold ${tradeTone(record.tradeType)}`}>{formatTradeType(record.tradeType)}</span>
+                      {record.status === 'pending' && <span className="text-xs font-semibold text-warning">待成交</span>}
                       <span className="text-xs text-secondary">{record.assetType === 'fund' ? '基金' : '股票'} · {record.code}</span>
                     </div>
                     <p className="text-sm font-semibold text-primary truncate mt-1">{record.name || record.code}</p>
@@ -762,13 +781,15 @@ const TradeRecordsPanel = ({ records, onClose }: { records: AssetTradeRecord[]; 
                   </div>
                   <div className="text-right flex-shrink-0">
                     <p className="text-sm font-semibold text-primary">¥{record.amount.toFixed(2)}</p>
-                    <p className="text-xs text-secondary mt-1">{record.shares.toFixed(4)}份</p>
+                    <p className="text-xs text-secondary mt-1">
+                      {record.status === 'pending' ? '份额待确认' : `${record.shares.toFixed(4)}份`}
+                    </p>
                   </div>
                 </div>
                 <div className="grid grid-cols-3 gap-3 mt-4 text-xs">
-                  <Meta label="成交价" value={`¥${record.price.toFixed(4)}`} />
+                  <Meta label="成交价" value={record.status === 'pending' ? '待确认' : `¥${record.price.toFixed(4)}`} />
                   <Meta label="来源" value={record.source === 'recurring' ? '定投' : '手动'} />
-                  <Meta label="类型" value={formatTradeType(record.tradeType)} />
+                  <Meta label="状态" value={record.status === 'pending' ? '待成交' : '已成交'} />
                 </div>
               </div>
             ))
@@ -1080,8 +1101,13 @@ const ProfitAnalytics = ({
   const [trendRange, setTrendRange] = useState<AssetTrendRange>('week');
   const [calendarMode, setCalendarMode] = useState<AssetCalendarMode>('day');
   const latest = history.at(-1);
+  const cumulativeTrendHistory = useMemo(() => buildCumulativeTrendHistory(history), [history]);
   const filteredHistory = useMemo(() => filterPerformanceHistory(history, trendRange), [history, trendRange]);
-  const trendData = filteredHistory.map((item) => ({
+  const filteredTrendHistory = useMemo(
+    () => filterPerformanceHistory(cumulativeTrendHistory, trendRange),
+    [cumulativeTrendHistory, trendRange],
+  );
+  const trendData = filteredTrendHistory.map((item) => ({
     ...item,
     label: `${Number(item.date.slice(5, 7))}/${Number(item.date.slice(8, 10))}`,
   }));
@@ -1092,8 +1118,9 @@ const ProfitAnalytics = ({
   const calendarYears = buildCalendarYears(history);
   const monthProfit = calendarDays.reduce((sum, item) => sum + (item.snapshot?.dailyProfit ?? 0), 0);
   const rangeProfit = filteredHistory.reduce((sum, item) => sum + item.dailyProfit, 0);
-  const rangeProfitRate = filteredHistory.reduce((sum, item) => sum + item.dailyProfitRate, 0);
-  const latestBenchmark = filteredHistory.at(-1)?.benchmarkChangePercent ?? latest?.benchmarkChangePercent ?? 0;
+  const latestTrend = filteredTrendHistory.at(-1);
+  const cumulativeProfitRate = latestTrend?.cumulativeProfitRate ?? 0;
+  const cumulativeBenchmark = latestTrend?.cumulativeBenchmarkChangePercent ?? 0;
 
   return (
     <div className="space-y-4">
@@ -1101,11 +1128,11 @@ const ProfitAnalytics = ({
         <div className="flex items-start justify-between gap-3 mb-4">
           <div>
             <h3 className="text-base font-semibold text-primary">收益走势</h3>
-            {filteredHistory.length > 0 && (
+            {filteredTrendHistory.length > 0 && (
               <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs mt-2">
-                <span className={profitTone(rangeProfit)}>我的收益 {formatSignedCurrency(rangeProfit)}</span>
-                <span className={profitTone(rangeProfitRate)}>收益率 {formatSignedPercent(rangeProfitRate)}</span>
-                <span className={profitTone(latestBenchmark)}>上证指数 {formatSignedPercent(latestBenchmark)}</span>
+                <span className={profitTone(rangeProfit)}>区间收益 {formatSignedCurrency(rangeProfit)}</span>
+                <span className={profitTone(cumulativeProfitRate)}>我的收益 {formatSignedPercent(cumulativeProfitRate)}</span>
+                <span className={profitTone(cumulativeBenchmark)}>上证指数 {formatSignedPercent(cumulativeBenchmark)}</span>
               </div>
             )}
           </div>
@@ -1136,14 +1163,14 @@ const ProfitAnalytics = ({
                 <Tooltip
                   formatter={(value: number, name) => [
                     formatSignedPercent(value),
-                    name === 'dailyProfitRate' ? '我的收益' : '上证指数',
+                    String(name),
                   ]}
                   labelFormatter={(label) => String(label)}
                   contentStyle={{ borderRadius: '12px', border: '1px solid #e4e4e7', fontSize: '12px', boxShadow: 'none' }}
                 />
                 <Area
                   type="monotone"
-                  dataKey="dailyProfitRate"
+                  dataKey="cumulativeProfitRate"
                   stroke="#ef4444"
                   strokeWidth={2}
                   fill="url(#assetProfitTrend)"
@@ -1151,7 +1178,7 @@ const ProfitAnalytics = ({
                 />
                 <Line
                   type="monotone"
-                  dataKey="benchmarkChangePercent"
+                  dataKey="cumulativeBenchmarkChangePercent"
                   stroke="#6384e8"
                   strokeWidth={1.8}
                   dot={false}
@@ -1380,7 +1407,30 @@ const buildCalendarDays = (month: string, history: AssetPerformanceSnapshot[]) =
   return days;
 };
 
-const filterPerformanceHistory = (history: AssetPerformanceSnapshot[], range: AssetTrendRange) => {
+type CumulativeAssetTrend = AssetPerformanceSnapshot & {
+  cumulativeProfitRate: number;
+  cumulativeBenchmarkChangePercent: number;
+};
+
+const buildCumulativeTrendHistory = (history: AssetPerformanceSnapshot[]): CumulativeAssetTrend[] => {
+  let profitMultiplier = 1;
+  let benchmarkMultiplier = 1;
+
+  return [...history]
+    .sort((left, right) => left.date.localeCompare(right.date))
+    .map((item) => {
+      profitMultiplier *= 1 + item.dailyProfitRate / 100;
+      benchmarkMultiplier *= 1 + item.benchmarkChangePercent / 100;
+
+      return {
+        ...item,
+        cumulativeProfitRate: (profitMultiplier - 1) * 100,
+        cumulativeBenchmarkChangePercent: (benchmarkMultiplier - 1) * 100,
+      };
+    });
+};
+
+const filterPerformanceHistory = <T extends AssetPerformanceSnapshot>(history: T[], range: AssetTrendRange) => {
   if (range === 'all' || history.length === 0) {
     return history;
   }

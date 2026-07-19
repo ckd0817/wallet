@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 
 import {
   AppTab,
+  AppSettings,
   AssetHolding,
   AssetImportCandidate,
   AssetPerformanceSnapshot,
@@ -58,9 +59,13 @@ import {
 } from './services/walletStore';
 import { mergeBackupData } from './services/dataBackup';
 import {
+  advanceAssetRecurringPlanPastDate,
   applyAssetRecurringPurchaseWithQuote,
   buildAssetPerformanceSnapshot,
   buildAssetPositions,
+  getAssetQuoteConfirmedDate,
+  isDelayedSettlementFund,
+  isLikelyMarketOpenForHolding,
   mergeAssetPerformanceHistory,
 } from './services/assetEngine';
 
@@ -85,11 +90,17 @@ const App: React.FC = () => {
   const [assetPerformanceHistory, setAssetPerformanceHistory] = useState<AssetPerformanceSnapshot[]>([]);
   const [assetTradeRecords, setAssetTradeRecords] = useState<AssetTradeRecord[]>([]);
   const [llmConfig, setLlmConfig] = useState<LLMConfig>(buildDefaultSnapshot().llmConfig);
+  const [appSettings, setAppSettings] = useState<AppSettings>(buildDefaultSnapshot().appSettings);
   const [autoBookkeepingSettings, setAutoBookkeepingSettings] = useState<AutoBookkeepingSettings>(defaultAutoBookkeepingSettings());
   const [isInitialized, setIsInitialized] = useState(false);
   const [isSyncingAssets, setIsSyncingAssets] = useState(false);
   const [assetSyncNotice, setAssetSyncNotice] = useState('');
   const isHydratingRef = useRef(false);
+
+  const getTodayKey = () => {
+    const today = new Date();
+    return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  };
 
   const applySnapshot = useCallback((snapshot: WalletSnapshot) => {
     setSnapshotMeta({
@@ -106,6 +117,7 @@ const App: React.FC = () => {
     setAssetPerformanceHistory(snapshot.assetPerformanceHistory);
     setAssetTradeRecords(snapshot.assetTradeRecords);
     setLlmConfig(snapshot.llmConfig);
+    setAppSettings(snapshot.appSettings);
     setAutoBookkeepingSettings(snapshot.autoBookkeepingSettings);
   }, []);
 
@@ -175,6 +187,7 @@ const App: React.FC = () => {
         assetPerformanceHistory,
         assetTradeRecords,
         llmConfig,
+        appSettings,
         autoBookkeepingSettings,
       }),
     [
@@ -187,6 +200,7 @@ const App: React.FC = () => {
       captureLogs,
       categories,
       llmConfig,
+      appSettings,
       recurringProfiles,
       snapshotMeta,
       transactions,
@@ -220,6 +234,7 @@ const App: React.FC = () => {
           ? webSnapshot.assetTradeRecords
           : nativeSnapshot.assetTradeRecords,
         llmConfig: webSnapshot.llmConfig,
+        appSettings: webSnapshot.appSettings,
         migratedFromWebStorage: true,
         autoBookkeepingSettings: {
           ...nativeSnapshot.autoBookkeepingSettings,
@@ -234,12 +249,90 @@ const App: React.FC = () => {
 
   const processAssetRecurringPlans = useCallback(
     async (snapshot: WalletSnapshot): Promise<{ snapshot: WalletSnapshot; hasUpdates: boolean }> => {
-      const today = new Date().toISOString().split('T')[0];
+      const today = getTodayKey();
       const holdings = snapshot.assetHoldings.map((holding) => ({ ...holding }));
       const plans = snapshot.assetRecurringPlans.map((plan) => ({ ...plan }));
       const tradeRecords = snapshot.assetTradeRecords.map((record) => ({ ...record }));
       const quoteMap = new Map(snapshot.assetQuoteCache.map((quote) => [`${quote.assetType}:${quote.code}`, quote]));
       let hasUpdates = false;
+      const fetchHoldingQuote = async (holding: AssetHolding) => {
+        const quotes = runningInAndroid
+          ? await syncNativeAssetQuotes([holding])
+          : await syncWebAssetQuotes([holding]);
+        quotes.forEach((quote) => {
+          quoteMap.set(`${quote.assetType}:${quote.code}`, quote);
+        });
+        return quotes.find((item) => item.assetType === holding.assetType && item.code === holding.code) ?? null;
+      };
+
+      const pendingTradeEntries = tradeRecords
+        .map((record, index) => ({ record, index }))
+        .filter(({ record }) => record.status === 'pending')
+        .sort((left, right) => new Date(left.record.occurredAt).getTime() - new Date(right.record.occurredAt).getTime());
+
+      for (const { record, index } of pendingTradeEntries) {
+        if (record.amount <= 0) {
+          continue;
+        }
+
+        const holdingIndex = holdings.findIndex((holding) => holding.id === record.holdingId);
+        if (holdingIndex < 0 || holdings[holdingIndex].assetType !== 'fund') {
+          continue;
+        }
+
+        const quote = await fetchHoldingQuote(holdings[holdingIndex]);
+        const confirmedDate = getAssetQuoteConfirmedDate(quote);
+        const confirmedPrice = quote?.confirmedPrice && quote.confirmedPrice > 0
+          ? quote.confirmedPrice
+          : quote?.priceSource === 'confirmed'
+            ? quote.price
+            : 0;
+        const tradeDate = record.occurredAt.split('T')[0];
+        if (!confirmedDate || confirmedDate < tradeDate || confirmedPrice <= 0) {
+          continue;
+        }
+
+        const settledAt = new Date().toISOString();
+        const currentHolding = holdings[holdingIndex];
+        let settledShares = record.amount / confirmedPrice;
+        let nextShares = currentHolding.shares;
+        let nextCostAmount = currentHolding.costAmount;
+
+        if (!Number.isFinite(settledShares) || settledShares <= 0) {
+          continue;
+        }
+
+        if (record.tradeType === 'sell') {
+          settledShares = Math.min(settledShares, currentHolding.shares);
+          if (settledShares <= 0) {
+            continue;
+          }
+          const averageCost = currentHolding.shares > 0 ? currentHolding.costAmount / currentHolding.shares : 0;
+          nextShares = currentHolding.shares - settledShares;
+          nextCostAmount = nextShares <= 0 ? 0 : Math.max(0, currentHolding.costAmount - averageCost * settledShares);
+        } else {
+          nextShares = currentHolding.shares + settledShares;
+          nextCostAmount = currentHolding.costAmount + record.amount;
+        }
+
+        holdings[holdingIndex] = {
+          ...currentHolding,
+          shares: nextShares,
+          costAmount: nextCostAmount,
+          name: quote?.name || currentHolding.name,
+          updatedAt: settledAt,
+        };
+        tradeRecords[index] = {
+          ...record,
+          name: quote?.name || record.name,
+          status: 'completed',
+          shares: settledShares,
+          price: confirmedPrice,
+          priceSource: 'confirmed',
+          settledAt,
+        };
+        hasUpdates = true;
+      }
 
       for (const plan of plans) {
         if (!plan.enabled || plan.amount <= 0) {
@@ -256,13 +349,85 @@ const App: React.FC = () => {
         }
 
         const currentHolding = holdings[holdingIndex];
-        const quotes = runningInAndroid
-          ? await syncNativeAssetQuotes([currentHolding])
-          : await syncWebAssetQuotes([currentHolding]);
-        quotes.forEach((quote) => {
-          quoteMap.set(`${quote.assetType}:${quote.code}`, quote);
-        });
-        const quote = quotes.find((item) => item.assetType === currentHolding.assetType && item.code === currentHolding.code);
+        const quote = await fetchHoldingQuote(currentHolding);
+        const holdingForRule = {
+          ...currentHolding,
+          name: quote?.name || currentHolding.name,
+        };
+
+        if (quote && !isLikelyMarketOpenForHolding(today, quote, holdingForRule)) {
+          continue;
+        }
+
+        if (isDelayedSettlementFund(holdingForRule)) {
+          const confirmedDate = getAssetQuoteConfirmedDate(quote);
+          const confirmedPrice = quote?.confirmedPrice && quote.confirmedPrice > 0
+            ? quote.confirmedPrice
+            : quote?.priceSource === 'confirmed'
+              ? quote.price
+              : 0;
+          const executionDate = plan.nextDueDate <= today ? plan.nextDueDate : '';
+          const alreadyRecorded = tradeRecords.some(
+            (record) =>
+              record.tradeType === 'recurring' &&
+              record.source === 'recurring' &&
+              record.recurringPlanId === plan.id &&
+              record.occurredAt.startsWith(executionDate),
+          );
+          if (!executionDate || alreadyRecorded) {
+            continue;
+          }
+
+          if (confirmedDate && confirmedDate >= executionDate && confirmedPrice > 0) {
+            const addedShares = plan.amount / confirmedPrice;
+            holdings[holdingIndex] = {
+              ...holdingForRule,
+              shares: holdingForRule.shares + addedShares,
+              costAmount: holdingForRule.costAmount + plan.amount,
+              updatedAt: new Date().toISOString(),
+            };
+            Object.assign(plan, advanceAssetRecurringPlanPastDate(plan, executionDate));
+            tradeRecords.unshift({
+              id: uuidv4(),
+              holdingId: currentHolding.id,
+              assetType: currentHolding.assetType,
+              code: currentHolding.code,
+              name: quote?.name || currentHolding.name,
+              tradeType: 'recurring',
+              source: 'recurring',
+              status: 'completed',
+              recurringPlanId: plan.id,
+              shares: addedShares,
+              amount: plan.amount,
+              price: confirmedPrice,
+              priceSource: 'confirmed',
+              occurredAt: `${executionDate}T00:00:00.000Z`,
+              createdAt: new Date().toISOString(),
+              settledAt: new Date().toISOString(),
+            });
+          } else {
+            Object.assign(plan, advanceAssetRecurringPlanPastDate(plan, executionDate));
+            tradeRecords.unshift({
+              id: uuidv4(),
+              holdingId: currentHolding.id,
+              assetType: currentHolding.assetType,
+              code: currentHolding.code,
+              name: quote?.name || currentHolding.name,
+              tradeType: 'recurring',
+              source: 'recurring',
+              status: 'pending',
+              recurringPlanId: plan.id,
+              shares: 0,
+              amount: plan.amount,
+              price: 0,
+              occurredAt: `${executionDate}T00:00:00.000Z`,
+              createdAt: new Date().toISOString(),
+            });
+          }
+          hasUpdates = true;
+          continue;
+        }
+
         const execution = quote ? applyAssetRecurringPurchaseWithQuote(currentHolding, plan, quote, today) : null;
         if (!execution) {
           continue;
@@ -278,11 +443,15 @@ const App: React.FC = () => {
           name: quote.name || currentHolding.name,
           tradeType: 'recurring',
           source: 'recurring',
+          status: 'completed',
+          recurringPlanId: plan.id,
           shares: execution.addedShares,
           amount: plan.amount,
           price: quote.price,
+          priceSource: quote.priceSource,
           occurredAt: `${execution.executionDate ?? today}T00:00:00.000Z`,
           createdAt: new Date().toISOString(),
+          settledAt: new Date().toISOString(),
         });
         hasUpdates = true;
       }
@@ -713,21 +882,27 @@ const App: React.FC = () => {
 
   const syncAssetQuotesForSnapshot = useCallback(
     async (holdings: AssetHolding[], baseSnapshot: WalletSnapshot) => {
-      if (holdings.length === 0 || isSyncingAssets) {
+      if (baseSnapshot.assetHoldings.length === 0 || isSyncingAssets) {
         return;
       }
 
       setIsSyncingAssets(true);
       try {
-        const quotes = runningInAndroid ? await syncNativeAssetQuotes(holdings) : await syncWebAssetQuotes(holdings);
-        const quoteMap = new Map(baseSnapshot.assetQuoteCache.map((quote) => [`${quote.assetType}:${quote.code}`, quote]));
+        const recurringResult = await processAssetRecurringPlans(baseSnapshot);
+        const workingSnapshot = recurringResult.snapshot;
+        const quotes = runningInAndroid
+          ? await syncNativeAssetQuotes(workingSnapshot.assetHoldings)
+          : await syncWebAssetQuotes(workingSnapshot.assetHoldings);
+        const quoteMap = new Map<string, AssetQuote>(
+          workingSnapshot.assetQuoteCache.map((quote) => [`${quote.assetType}:${quote.code}`, quote]),
+        );
         quotes.forEach((quote) => {
           quoteMap.set(`${quote.assetType}:${quote.code}`, quote);
         });
-        const quoteNameMap = new Map(
+        const quoteNameMap = new Map<string, AssetQuote>(
           quotes.filter((quote) => quote.name.trim()).map((quote) => [`${quote.assetType}:${quote.code}`, quote]),
         );
-        const assetHoldingsWithNames = baseSnapshot.assetHoldings.map((holding) => {
+        const assetHoldingsWithNames = workingSnapshot.assetHoldings.map((holding) => {
           const quote = quoteNameMap.get(`${holding.assetType}:${holding.code}`);
           const quoteName = quote?.name.trim();
           if (!quoteName || holding.name === quoteName) {
@@ -746,11 +921,11 @@ const App: React.FC = () => {
           benchmarkQuote,
         );
         const nextSnapshot = normalizeSnapshot({
-          ...baseSnapshot,
+          ...workingSnapshot,
           assetHoldings: assetHoldingsWithNames,
           assetQuoteCache: updatedQuoteCache,
           assetPerformanceHistory: mergeAssetPerformanceHistory(
-            baseSnapshot.assetPerformanceHistory,
+            workingSnapshot.assetPerformanceHistory,
             nextPerformanceSnapshot,
           ),
         });
@@ -768,7 +943,7 @@ const App: React.FC = () => {
         setIsSyncingAssets(false);
       }
     },
-    [applySnapshot, isSyncingAssets, runningInAndroid],
+    [applySnapshot, isSyncingAssets, processAssetRecurringPlans, runningInAndroid],
   );
 
   const handleAddAssetHolding = async (data: Omit<AssetHolding, 'id' | 'createdAt' | 'updatedAt'>) => {
@@ -883,11 +1058,14 @@ const App: React.FC = () => {
     });
 
     if (runningInAndroid) {
-      applySnapshot(await saveNativeSnapshot(nextSnapshot));
+      const savedSnapshot = await saveNativeSnapshot(nextSnapshot);
+      applySnapshot(savedSnapshot);
+      void syncAssetQuotesForSnapshot(savedSnapshot.assetHoldings, savedSnapshot);
       return;
     }
 
     applySnapshot(nextSnapshot);
+    void syncAssetQuotesForSnapshot(nextSnapshot.assetHoldings, nextSnapshot);
   };
 
   const handleDeleteAssetRecurringPlan = async (id: string) => {
@@ -920,6 +1098,20 @@ const App: React.FC = () => {
     return result.holdings;
   };
 
+  const handleUpdateAppSettings = async (settings: AppSettings) => {
+    const nextSnapshot = normalizeSnapshot({
+      ...buildCurrentSnapshot(),
+      appSettings: settings,
+    });
+
+    if (runningInAndroid) {
+      applySnapshot(await saveNativeSnapshot(nextSnapshot));
+      return;
+    }
+
+    applySnapshot(nextSnapshot);
+  };
+
   const renderContent = () => {
     switch (activeTab) {
       case AppTab.DASHBOARD:
@@ -937,6 +1129,7 @@ const App: React.FC = () => {
         return (
           <Analysis
             transactions={transactions}
+            expenseAverageMonths={appSettings.expenseAverageMonths}
             assetHoldings={assetHoldings}
             assetQuoteCache={assetQuoteCache}
             assetRecurringPlans={assetRecurringPlans}
@@ -963,8 +1156,10 @@ const App: React.FC = () => {
             assetTradeRecords={assetTradeRecords}
             llmConfig={llmConfig}
             autoBookkeepingSettings={autoBookkeepingSettings}
+            appSettings={appSettings}
             captureLogs={captureLogs}
             onUpdateLLMConfig={handleUpdateLLMConfig}
+            onUpdateAppSettings={handleUpdateAppSettings}
             onImport={handleImportBackup}
             onDeleteRecurring={handleDeleteRecurring}
             onOpenAccessibilitySettings={handleOpenAccessibilitySettings}

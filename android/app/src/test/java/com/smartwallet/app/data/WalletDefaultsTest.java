@@ -26,6 +26,7 @@ public class WalletDefaultsTest {
         JSONObject store = WalletDefaults.defaultStore();
         JSONObject bookkeepingSettings = store.optJSONObject("autoBookkeepingSettings");
         JSONObject llmConfig = store.optJSONObject("llmConfig");
+        JSONObject appSettings = store.optJSONObject("appSettings");
 
         assertTrue(store.has("transactions"));
         assertTrue(store.has("llmConfig"));
@@ -36,6 +37,8 @@ public class WalletDefaultsTest {
         assertTrue(store.has("assetTradeRecords"));
         assertTrue(bookkeepingSettings != null);
         assertTrue(llmConfig != null);
+        assertTrue(appSettings != null);
+        assertEquals(1, appSettings.optInt("expenseAverageMonths"));
         assertFalse(llmConfig.has("enabled"));
         assertFalse(bookkeepingSettings.has("sessionActive"));
         assertFalse(bookkeepingSettings.optBoolean("accessibilityEnabled", true));
@@ -90,6 +93,20 @@ public class WalletDefaultsTest {
         assertTrue(mergedLlmConfig != null);
         assertEquals(currentDefaultPrompt, mergedLlmConfig.optString("capturePrompt"));
         assertTrue(currentDefaultPrompt.contains("如果截图里同时出现多笔支出记录，优先记录最新的一条，不要同时输出两条或多条记录。"));
+        assertTrue(currentDefaultPrompt.contains("pickupCode"));
+        assertFalse(currentDefaultPrompt.contains("\"summary\":\"...\""));
+    }
+
+    @Test
+    public void ensureDefaultsKeepsExpenseAverageMonthsInRange() throws Exception {
+        JSONObject candidate = new JSONObject();
+        JSONObject appSettings = new JSONObject();
+        appSettings.put("expenseAverageMonths", 24);
+        candidate.put("appSettings", appSettings);
+
+        JSONObject merged = WalletDefaults.ensureDefaults(candidate);
+
+        assertEquals(12, merged.optJSONObject("appSettings").optInt("expenseAverageMonths"));
     }
 
     private static JSONObject category(String id, String name) throws Exception {

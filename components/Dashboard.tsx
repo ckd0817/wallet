@@ -155,6 +155,9 @@ const Dashboard: React.FC<DashboardProps> = ({ transactions, categories, onDelet
                                                   )}
                                                 </div>
                                                 {t.note && <p className="text-xs text-zinc-400 truncate max-w-[180px]">{t.note}</p>}
+                                                {t.pickupCode && (
+                                                  <p className="text-xs font-semibold text-primary truncate max-w-[180px]">取餐码 {t.pickupCode}</p>
+                                                )}
                                                 {t.merchantName && t.createdBy === 'screenshot_capture' && (
                                                   <p className="text-xs text-zinc-300 truncate max-w-[180px]">{t.merchantName}</p>
                                                 )}

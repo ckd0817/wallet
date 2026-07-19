@@ -29,7 +29,7 @@ public class CaptureLogFactoryTest {
             .put("status", "processing")
             .put("imagePath", "file:///captures/retry.png");
         CaptureAnalysisOutcome outcome = new CaptureAnalysisOutcome(
-            new CaptureAnalysisResult(true, "expense", 88.5d, "测试商户", "2026-04-15", "food", "午饭", "识别完成", ""),
+            new CaptureAnalysisResult(true, "expense", 88.5d, "测试商户", "2026-04-15", "food", "午饭", "A102", "识别完成", ""),
             200,
             "{\"id\":\"response\"}",
             "{\"amount\":88.5}",
@@ -45,7 +45,8 @@ public class CaptureLogFactoryTest {
         assertEquals("file:///captures/retry.png", completedLog.optString("imagePath"));
         assertEquals("txn-1", completedLog.optString("transactionId"));
         assertEquals("测试商户", completedLog.optString("merchantName"));
-        assertEquals("识别完成", completedLog.optString("summary"));
+        assertEquals("午饭", completedLog.optString("summary"));
+        assertEquals("A102", completedLog.optString("pickupCode"));
         assertTrue(completedLog.optDouble("amount", 0d) > 0d);
     }
 
