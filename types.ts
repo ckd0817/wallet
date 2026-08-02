@@ -66,6 +66,15 @@ export type AssetTradeType = 'buy' | 'sell' | 'recurring';
 export type AssetTradeSource = 'manual' | 'recurring';
 export type AssetQuotePriceSource = 'estimated' | 'confirmed';
 export type AssetTradeStatus = 'pending' | 'completed';
+export type FundQuoteSource = 'eastmoney' | 'sina' | 'tencent' | 'legacy';
+export type FundQuoteSourceOption = FundQuoteSource;
+
+export interface FundQuoteSourceTestResult {
+  source: FundQuoteSourceOption;
+  ok: boolean;
+  message: string;
+  quoteTime?: string;
+}
 
 export interface AssetHolding {
   id: string;
@@ -211,6 +220,7 @@ export interface AutoBookkeepingSettings {
 
 export interface AppSettings {
   expenseAverageMonths: number;
+  fundQuoteSource: FundQuoteSource;
 }
 
 export interface WalletSnapshot {

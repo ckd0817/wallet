@@ -12,6 +12,9 @@ import {
   AssetTradeRecord,
   CaptureAttemptLog,
   Category,
+  FundQuoteSource,
+  FundQuoteSourceOption,
+  FundQuoteSourceTestResult,
   LLMConfig,
   LLMConfigTestResult,
   RecurringProfile,
@@ -22,7 +25,10 @@ import {
   normalizeAssetHolding,
   normalizeAssetPerformanceSnapshot,
   normalizeAssetQuote,
+  parseEastmoneyFundQuoteResponse,
   parseFundQuoteResponse,
+  parseSinaFundQuoteResponse,
+  parseTencentFundQuoteResponse,
   parseTencentStockQuoteResponse,
 } from './assetEngine';
 import { normalizeCategoryState } from './categoryState';
@@ -54,7 +60,12 @@ interface WalletDataPlugin {
   saveLlmConfig(options: { llmConfig: LLMConfig }): Promise<WalletSnapshot>;
   upsertAssetHolding(options: { assetHolding: AssetHolding }): Promise<WalletSnapshot>;
   deleteAssetHolding(options: { id: string }): Promise<WalletSnapshot>;
-  syncAssetQuotes(options: { assetHoldings: AssetHolding[] }): Promise<{ quotes: AssetQuote[] }>;
+  syncAssetQuotes(options: { assetHoldings: AssetHolding[]; fundQuoteSource: FundQuoteSource }): Promise<{ quotes: AssetQuote[] }>;
+  testFundQuoteSource(options: {
+    source: FundQuoteSourceOption;
+    code: string;
+    name: string;
+  }): Promise<FundQuoteSourceTestResult>;
   analyzeAssetScreenshot(options: { imageBase64: string }): Promise<AssetScreenshotAnalysisResult>;
 }
 
@@ -111,7 +122,7 @@ const SUMMARY_CAPTURE_PROMPT = [
   '只返回 JSON，不要输出 Markdown、解释或额外文本。返回格式固定为 {"transactionType":"expense|income","amount":number,"merchantName":"...","occurredAt":"YYYY-MM-DD","categoryId":"...","note":"...","summary":"..."}。',
 ].join('\n');
 
-export const DEFAULT_CAPTURE_PROMPT = [
+const PICKUP_CODE_CAPTURE_PROMPT = [
   '你正在分析一张付款、收款或退款结果截图。',
   '今天的本地日期是 {{today_date}}。在推断 occurredAt 时优先使用这个日期；只有截图里明确出现其他日期时，才使用截图中的日期。',
   '你只能识别两种交易类型：expense 或 income。',
@@ -120,6 +131,22 @@ export const DEFAULT_CAPTURE_PROMPT = [
   'note 只写一条简短备注，包含原来需要放在摘要里的关键信息，不要再额外输出 summary。',
   '如果截图里出现取餐号、取餐码、餐号、柜号、口令等用于取餐的号码或短码，写入 pickupCode；没有就写空字符串。',
   '如果截图不足以确认是一笔有效入账记录，或者无法确认金额，就仍然只返回 JSON，并将 amount 设为 0，categoryId 设为空字符串，note 写明原因。',
+  '如果截图里同时出现多笔支出记录，优先记录最新的一条，不要同时输出两条或多条记录。',
+  '如果 transactionType=expense，categoryId 必须且只能从这些支出分类中选择：{{expense_categories}}。',
+  '如果 transactionType=income，categoryId 必须且只能从这些收入分类中选择：{{income_categories}}。',
+  '只返回 JSON，不要输出 Markdown、解释或额外文本。返回格式固定为 {"transactionType":"expense|income","amount":number,"merchantName":"...","occurredAt":"YYYY-MM-DD","categoryId":"...","note":"...","pickupCode":"..."}。',
+].join('\n');
+
+export const DEFAULT_CAPTURE_PROMPT = [
+  '你正在分析一张付款、收款或退款结果截图。',
+  '今天的本地日期是 {{today_date}}。在推断 occurredAt 时优先使用这个日期；只有截图里明确出现其他日期时，才使用截图中的日期。',
+  '你只能识别两种交易类型：expense 或 income。',
+  '付款成功、消费支出、扣款成功等记为 expense。',
+  '收款到账、退款到账、报销到账等记为 income。',
+  'note 只写一条简短备注，包含原来需要放在摘要里的关键信息，不要再额外输出 summary。',
+  '如果截图里出现取餐号、取餐码、餐号、柜号、口令等用于取餐的号码或短码，写入 pickupCode；没有就写空字符串。',
+  '如果截图显示“先用后付”“0元下单”“本次支付0元”等延后扣款场景，即使当前支付金额为0，只要能从订单应付金额、待扣金额、合计金额或商品成交价中确认后续实际需要扣款的金额，就将该金额作为 amount 并记为 expense；不要将 amount 设为0，也不要判定为无法确认金额。',
+  '如果截图无法确认金额，就仍然只返回 JSON，并将 amount 设为 0，categoryId 设为空字符串，note 写明原因。',
   '如果截图里同时出现多笔支出记录，优先记录最新的一条，不要同时输出两条或多条记录。',
   '如果 transactionType=expense，categoryId 必须且只能从这些支出分类中选择：{{expense_categories}}。',
   '如果 transactionType=income，categoryId 必须且只能从这些收入分类中选择：{{income_categories}}。',
@@ -143,6 +170,7 @@ export const defaultAutoBookkeepingSettings = (): AutoBookkeepingSettings => ({
 
 export const defaultAppSettings = (): AppSettings => ({
   expenseAverageMonths: 1,
+  fundQuoteSource: 'eastmoney',
 });
 
 export const buildDefaultSnapshot = (): WalletSnapshot => ({
@@ -179,7 +207,8 @@ const normalizeLlmConfig = (llmConfig?: Partial<LLMConfig> | null): LLMConfig =>
     capturePrompt:
       normalizedCapturePrompt === LEGACY_CAPTURE_PROMPT ||
       normalizedCapturePrompt === PREVIOUS_DEFAULT_CAPTURE_PROMPT ||
-      normalizedCapturePrompt === SUMMARY_CAPTURE_PROMPT
+      normalizedCapturePrompt === SUMMARY_CAPTURE_PROMPT ||
+      normalizedCapturePrompt === PICKUP_CODE_CAPTURE_PROMPT
         ? DEFAULT_CAPTURE_PROMPT
         : capturePrompt,
   };
@@ -291,9 +320,17 @@ const normalizeAutoBookkeepingSettings = (
 
 const normalizeAppSettings = (appSettings?: Partial<AppSettings> | Record<string, unknown> | null): AppSettings => {
   const months = appSettings?.expenseAverageMonths;
+  const fundQuoteSource = appSettings?.fundQuoteSource;
   return {
     expenseAverageMonths:
       typeof months === 'number' && Number.isInteger(months) ? Math.min(12, Math.max(1, months)) : 1,
+    fundQuoteSource:
+      fundQuoteSource === 'sina' ||
+      fundQuoteSource === 'tencent' ||
+      fundQuoteSource === 'legacy' ||
+      fundQuoteSource === 'eastmoney'
+        ? fundQuoteSource
+        : 'eastmoney',
   };
 };
 
@@ -415,15 +452,24 @@ export const saveNativeAssetHolding = async (assetHolding: AssetHolding) =>
 export const deleteNativeAssetHolding = async (id: string) =>
   normalizeSnapshot(await WalletData.deleteAssetHolding({ id }));
 
-export const syncNativeAssetQuotes = async (assetHoldings: AssetHolding[]) => {
-  const result = await WalletData.syncAssetQuotes({ assetHoldings });
+export const syncNativeAssetQuotes = async (assetHoldings: AssetHolding[], fundQuoteSource: FundQuoteSource) => {
+  const result = await WalletData.syncAssetQuotes({ assetHoldings, fundQuoteSource });
   return normalizeAssetQuotes(result.quotes);
 };
+
+export const testNativeFundQuoteSource = async (
+  source: FundQuoteSourceOption,
+  code: string,
+  name: string,
+): Promise<FundQuoteSourceTestResult> => WalletData.testFundQuoteSource({ source, code, name });
 
 export const analyzeNativeAssetScreenshot = async (imageBase64: string): Promise<AssetScreenshotAnalysisResult> =>
   WalletData.analyzeAssetScreenshot({ imageBase64 });
 
-export const syncWebAssetQuotes = async (assetHoldings: AssetHolding[]) => {
+export const syncWebAssetQuotes = async (
+  assetHoldings: AssetHolding[],
+  fundQuoteSource: FundQuoteSource = 'eastmoney',
+) => {
   const syncedAt = new Date().toISOString();
   const quotes: AssetQuote[] = [];
   const stocks = assetHoldings.filter((holding) => holding.assetType === 'stock');
@@ -437,8 +483,25 @@ export const syncWebAssetQuotes = async (assetHoldings: AssetHolding[]) => {
   }
 
   for (const holding of funds) {
-    const response = await fetch(`https://fundgz.1234567.com.cn/js/${holding.code}.js?rt=${Date.now()}`);
-    const quote = parseFundQuoteResponse(await response.text(), syncedAt);
+    let quote: AssetQuote | null = null;
+    if (fundQuoteSource === 'legacy') {
+      const response = await fetch(`https://fundgz.1234567.com.cn/js/${holding.code}.js?rt=${Date.now()}`);
+      quote = parseFundQuoteResponse(await response.text(), syncedAt);
+    } else if (fundQuoteSource === 'sina') {
+      const response = await fetch(
+        `https://stock.finance.sina.com.cn/fundInfo/api/openapi.php/CaihuiFundInfoService.getNav?symbol=${holding.code}&page=1&num=2`,
+      );
+      quote = parseSinaFundQuoteResponse(await response.text(), holding.code, holding.name, syncedAt);
+    } else if (fundQuoteSource === 'tencent') {
+      const response = await fetch(`https://qt.gtimg.cn/q=jj${holding.code}`);
+      const content = new TextDecoder('gbk').decode(await response.arrayBuffer());
+      quote = parseTencentFundQuoteResponse(content, holding.code, holding.name, syncedAt);
+    } else {
+      const response = await fetch(
+        `https://api.fund.eastmoney.com/f10/lsjz?fundCode=${holding.code}&pageIndex=1&pageSize=2`,
+      );
+      quote = parseEastmoneyFundQuoteResponse(await response.text(), holding.code, holding.name, syncedAt);
+    }
     if (quote) {
       quotes.push(quote);
     }

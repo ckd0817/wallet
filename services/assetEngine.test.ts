@@ -10,7 +10,10 @@ import {
   isLikelyMarketOpenForHolding,
   mergeAssetPerformanceHistory,
   normalizeAssetImportCandidate,
+  parseEastmoneyFundQuoteResponse,
   parseFundQuoteResponse,
+  parseSinaFundQuoteResponse,
+  parseTencentFundQuoteResponse,
   parseTencentStockQuoteResponse,
   resolveAssetTotalCost,
 } from './assetEngine';
@@ -33,6 +36,59 @@ describe('assetEngine', () => {
       estimatedPrice: 1.4461,
       confirmedPrice: 1.407,
       confirmedDate: '2026-06-17',
+    });
+  });
+
+  it('解析东方财富确认净值', () => {
+    const quote = parseEastmoneyFundQuoteResponse(
+      '{"Data":{"LSJZList":[{"FSRQ":"2026-07-31","DWJZ":"1.3115","JZZZL":"0.05"}]},"ErrCode":0}',
+      '004388',
+      '鹏华丰享债券',
+      '2026-08-01T08:00:00.000Z',
+    );
+
+    expect(quote).toMatchObject({
+      code: '004388',
+      price: 1.3115,
+      changePercent: 0.05,
+      confirmedDate: '2026-07-31',
+      priceSource: 'confirmed',
+      source: 'eastmoney-f10',
+    });
+  });
+
+  it('解析新浪确认净值并计算涨幅', () => {
+    const quote = parseSinaFundQuoteResponse(
+      '{"result":{"status":{"code":0},"data":{"data":[{"fbrq":"2026-07-31 00:00:00","jjjz":"1.3115"},{"fbrq":"2026-07-30 00:00:00","jjjz":"1.3109"}]}}}',
+      '004388',
+      '鹏华丰享债券',
+      '2026-08-01T08:00:00.000Z',
+    );
+
+    expect(quote).toMatchObject({
+      code: '004388',
+      price: 1.3115,
+      confirmedDate: '2026-07-31',
+      source: 'sina-fund',
+    });
+    expect(quote?.changePercent).toBeCloseTo(0.0458, 3);
+  });
+
+  it('解析腾讯确认净值', () => {
+    const quote = parseTencentFundQuoteResponse(
+      'v_jj004388="004388~鹏华丰享债券~0.0000~0.0000~~1.3115~1.4725~0.0458~2026-07-31~";',
+      '004388',
+      '',
+      '2026-08-01T08:00:00.000Z',
+    );
+
+    expect(quote).toMatchObject({
+      code: '004388',
+      name: '鹏华丰享债券',
+      price: 1.3115,
+      changePercent: 0.0458,
+      confirmedDate: '2026-07-31',
+      source: 'tencent-fund',
     });
   });
 

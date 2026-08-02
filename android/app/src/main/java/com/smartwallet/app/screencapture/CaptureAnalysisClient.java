@@ -29,7 +29,8 @@ public class CaptureAnalysisClient {
         "收款到账、退款到账、报销到账等记为 income。\n" +
         "note 只写一条简短备注，包含原来需要放在摘要里的关键信息，不要再额外输出 summary。\n" +
         "如果截图里出现取餐号、取餐码、餐号、柜号、口令等用于取餐的号码或短码，写入 pickupCode；没有就写空字符串。\n" +
-        "如果截图不足以确认是一笔有效入账记录，或者无法确认金额，就仍然只返回 JSON，并将 amount 设为 0，categoryId 设为空字符串，note 写明原因。\n" +
+        "如果截图显示“先用后付”“0元下单”“本次支付0元”等延后扣款场景，即使当前支付金额为0，只要能从订单应付金额、待扣金额、合计金额或商品成交价中确认后续实际需要扣款的金额，就将该金额作为 amount 并记为 expense；不要将 amount 设为0，也不要判定为无法确认金额。\n" +
+        "如果截图无法确认金额，就仍然只返回 JSON，并将 amount 设为 0，categoryId 设为空字符串，note 写明原因。\n" +
         "如果截图里同时出现多笔支出记录，优先记录最新的一条，不要同时输出两条或多条记录。\n" +
         "如果 transactionType=expense，categoryId 必须且只能从这些支出分类中选择：{{expense_categories}}。\n" +
         "如果 transactionType=income，categoryId 必须且只能从这些收入分类中选择：{{income_categories}}。\n" +

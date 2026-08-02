@@ -120,11 +120,23 @@ public class WalletDataPlugin extends Plugin {
     @PluginMethod
     public void syncAssetQuotes(PluginCall call) {
         JSArray assetHoldings = call.getArray("assetHoldings");
-        JSONArray quotes = new AssetQuoteClient().sync(assetHoldings == null ? new JSArray() : assetHoldings);
+        String fundQuoteSource = call.getString("fundQuoteSource", AssetQuoteClient.SOURCE_EASTMONEY);
+        JSONArray quotes = new AssetQuoteClient().sync(
+            assetHoldings == null ? new JSArray() : assetHoldings,
+            fundQuoteSource
+        );
         repository().replaceAssetQuoteCache(quotes);
         JSObject result = new JSObject();
         result.put("quotes", quotes);
         call.resolve(result);
+    }
+
+    @PluginMethod
+    public void testFundQuoteSource(PluginCall call) {
+        String source = call.getString("source", AssetQuoteClient.SOURCE_EASTMONEY);
+        String code = call.getString("code", "004388");
+        String name = call.getString("name", "");
+        call.resolve(toJsObject(new AssetQuoteClient().testFundQuoteSource(source, code, name)));
     }
 
     @PluginMethod

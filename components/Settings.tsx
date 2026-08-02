@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   Battery,
   Bell,
@@ -28,6 +28,9 @@ import {
   AssetTradeRecord,
   CaptureAttemptLog,
   Category,
+  FundQuoteSource,
+  FundQuoteSourceOption,
+  FundQuoteSourceTestResult,
   LLMConfig,
   LLMConfigTestResult,
   RecurringProfile,
@@ -37,6 +40,20 @@ import {
 import { buildBackupPayload, parseBackupFile } from '../services/dataBackup';
 import { DEFAULT_CAPTURE_PROMPT, isNativeIgnoringBatteryOptimizations, requestNativeIgnoreBatteryOptimization } from '../services/walletStore';
 import { getRetryableCaptureLogIds } from './captureLogRetry';
+
+const FUND_QUOTE_SOURCES: Array<{
+  id: FundQuoteSourceOption;
+  name: string;
+}> = [
+  { id: 'eastmoney', name: '东方财富' },
+  { id: 'sina', name: '新浪财经' },
+  { id: 'tencent', name: '腾讯财经' },
+  { id: 'legacy', name: '天天基金' },
+];
+
+type FundSourceCheck = {
+  status: 'testing' | 'available' | 'unavailable';
+};
 
 interface SettingsProps {
   transactions: Transaction[];
@@ -53,7 +70,8 @@ interface SettingsProps {
   onImport: (data: WalletBackupData, mode: 'append' | 'overwrite') => void;
   onDeleteRecurring: (id: string) => void;
   onUpdateLLMConfig: (config: LLMConfig) => void;
-  onUpdateAppSettings: (settings: AppSettings) => void;
+  onUpdateAppSettings: (settings: AppSettings) => Promise<void> | void;
+  onTestFundQuoteSource: (source: FundQuoteSourceOption) => Promise<FundQuoteSourceTestResult>;
   onOpenAccessibilitySettings: () => Promise<void> | void;
   onTestModelConfig: () => Promise<LLMConfigTestResult> | LLMConfigTestResult;
   onRefreshAutoBookkeepingStatus: () => Promise<void> | void;
@@ -76,12 +94,19 @@ const Settings: React.FC<SettingsProps> = ({
   onDeleteRecurring,
   onUpdateLLMConfig,
   onUpdateAppSettings,
+  onTestFundQuoteSource,
   onOpenAccessibilitySettings,
   onTestModelConfig,
   onRefreshAutoBookkeepingStatus,
   onRetryCaptureLog,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const capturePromptRef = useRef<HTMLTextAreaElement>(null);
+  const capturePromptSelectionRef = useRef<{
+    start: number;
+    end: number;
+    direction: 'forward' | 'backward' | 'none';
+  } | null>(null);
   const [importMode, setImportMode] = useState<'append' | 'overwrite'>('append');
   const [isRefreshingStatus, setIsRefreshingStatus] = useState(false);
   const [isOpeningAccessibilitySettings, setIsOpeningAccessibilitySettings] = useState(false);
@@ -94,6 +119,7 @@ const Settings: React.FC<SettingsProps> = ({
   const [retryingLogIds, setRetryingLogIds] = useState<Record<string, boolean>>({});
   const [batteryOptimizationStatus, setBatteryOptimizationStatus] = useState<'checking' | 'ignored' | 'not_ignored'>('checking');
   const [isRequestingBatteryOptimization, setIsRequestingBatteryOptimization] = useState(false);
+  const [fundSourceChecks, setFundSourceChecks] = useState<Partial<Record<FundQuoteSourceOption, FundSourceCheck>>>({});
 
   const isAndroidNative = Capacitor.getPlatform() === 'android';
   const llmConfigured = Boolean(llmConfig.apiKey && llmConfig.baseUrl && llmConfig.modelName);
@@ -142,6 +168,29 @@ const Settings: React.FC<SettingsProps> = ({
   useEffect(() => {
     checkBatteryOptimization();
   }, []);
+
+  useLayoutEffect(() => {
+    const textarea = capturePromptRef.current;
+    const selection = capturePromptSelectionRef.current;
+    if (!textarea || !selection || document.activeElement !== textarea) {
+      return;
+    }
+
+    const textLength = textarea.value.length;
+    textarea.setSelectionRange(
+      Math.min(selection.start, textLength),
+      Math.min(selection.end, textLength),
+      selection.direction,
+    );
+  }, [llmConfig.capturePrompt]);
+
+  const rememberCapturePromptSelection = (textarea: HTMLTextAreaElement) => {
+    capturePromptSelectionRef.current = {
+      start: textarea.selectionStart,
+      end: textarea.selectionEnd,
+      direction: textarea.selectionDirection,
+    };
+  };
 
   const resolveImagePreview = (imagePath: string) => {
     if (!imagePath) {
@@ -310,6 +359,36 @@ const Settings: React.FC<SettingsProps> = ({
         delete nextState[logId];
         return nextState;
       });
+    }
+  };
+
+  const handleSelectFundQuoteSource = async (source: FundQuoteSourceOption) => {
+    if (fundSourceChecks[source]?.status === 'testing') {
+      return;
+    }
+    setFundSourceChecks((current) => ({
+      ...current,
+      [source]: { status: 'testing' },
+    }));
+    try {
+      const result = await onTestFundQuoteSource(source);
+      setFundSourceChecks((current) => ({
+        ...current,
+        [source]: {
+          status: result.ok ? 'available' : 'unavailable',
+        },
+      }));
+      if (result.ok) {
+        await onUpdateAppSettings({
+          ...appSettings,
+          fundQuoteSource: source as FundQuoteSource,
+        });
+      }
+    } catch {
+      setFundSourceChecks((current) => ({
+        ...current,
+        [source]: { status: 'unavailable' },
+      }));
     }
   };
 
@@ -507,8 +586,13 @@ const Settings: React.FC<SettingsProps> = ({
 
                     <ConfigField label="截图分析提示词">
                       <textarea
+                        ref={capturePromptRef}
                         value={llmConfig.capturePrompt}
-                        onChange={(event) => onUpdateLLMConfig({ ...llmConfig, capturePrompt: event.target.value })}
+                        onChange={(event) => {
+                          rememberCapturePromptSelection(event.currentTarget);
+                          onUpdateLLMConfig({ ...llmConfig, capturePrompt: event.currentTarget.value });
+                        }}
+                        onSelect={(event) => rememberCapturePromptSelection(event.currentTarget)}
                         rows={8}
                         className="w-full rounded-2xl border border-border bg-white px-4 py-3 text-sm leading-6 text-primary"
                       />
@@ -777,6 +861,57 @@ const Settings: React.FC<SettingsProps> = ({
       </section>
 
       <section>
+        <SectionHeader title="基金数据源" />
+        <div className="overflow-hidden rounded-[28px] border border-border bg-white shadow-sm divide-y divide-border">
+          {FUND_QUOTE_SOURCES.map((source) => {
+            const check = fundSourceChecks[source.id];
+            const isSelected = appSettings.fundQuoteSource === source.id;
+            const isTesting = check?.status === 'testing';
+            const statusLabel = isTesting
+              ? '检测中'
+              : check?.status === 'available'
+                ? '可用'
+                : check?.status === 'unavailable'
+                  ? '不可用'
+                  : isSelected
+                    ? '使用中'
+                    : '未检测';
+            const statusClass =
+              check?.status === 'available'
+                ? 'bg-emerald-50 text-emerald-700'
+                : check?.status === 'unavailable'
+                  ? 'bg-amber-50 text-amber-700'
+                  : 'bg-surface text-secondary';
+
+            return (
+              <button
+                key={source.id}
+                type="button"
+                onClick={() => void handleSelectFundQuoteSource(source.id)}
+                disabled={isTesting}
+                aria-pressed={isSelected}
+                className={`flex w-full items-center gap-4 px-5 py-5 text-left transition-[background-color,transform] duration-150 active:scale-[0.99] motion-reduce:transition-none ${
+                  isSelected ? 'bg-zinc-50/80' : 'hover:bg-surface/40'
+                }`}
+              >
+                <p className="min-w-0 flex-1 text-base font-semibold text-primary">{source.name}</p>
+                <span className={`inline-flex min-w-[4.5rem] items-center justify-center gap-1.5 rounded-full px-3 py-2 text-xs font-semibold ${statusClass}`}>
+                  {isTesting ? (
+                    <RefreshCcw className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" />
+                  ) : check?.status === 'available' ? (
+                    <CheckCircle2 className="h-3.5 w-3.5" />
+                  ) : check?.status === 'unavailable' ? (
+                    <CircleAlert className="h-3.5 w-3.5" />
+                  ) : null}
+                  {statusLabel}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </section>
+
+      <section>
         <SectionHeader title="资产统计" />
         <div className="flex items-center justify-between rounded-[28px] border border-border bg-white px-5 py-5 shadow-sm">
           <div className="flex items-center gap-4">
@@ -791,7 +926,12 @@ const Settings: React.FC<SettingsProps> = ({
           <select
             aria-label="日均支出统计周期"
             value={appSettings.expenseAverageMonths}
-            onChange={(event) => onUpdateAppSettings({ expenseAverageMonths: Number(event.target.value) })}
+            onChange={(event) =>
+              onUpdateAppSettings({
+                ...appSettings,
+                expenseAverageMonths: Number(event.target.value),
+              })
+            }
             className="rounded-2xl border border-border bg-surface px-4 py-2.5 text-sm font-semibold text-primary outline-none"
           >
             {Array.from({ length: 12 }, (_, index) => index + 1).map((months) => (

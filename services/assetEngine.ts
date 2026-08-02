@@ -345,6 +345,125 @@ export const parseFundQuoteResponse = (content: string, syncedAt = new Date().to
   }
 };
 
+const buildConfirmedFundQuote = ({
+  code,
+  name,
+  price,
+  changePercent,
+  confirmedDate,
+  source,
+  syncedAt,
+}: {
+  code: string;
+  name: string;
+  price: number;
+  changePercent: number;
+  confirmedDate: string;
+  source: string;
+  syncedAt: string;
+}): AssetQuote | null => {
+  const normalizedCode = normalizeAssetCode(code);
+  if (!normalizedCode || !Number.isFinite(price) || price <= 0 || !confirmedDate) {
+    return null;
+  }
+
+  return {
+    assetType: 'fund',
+    code: normalizedCode,
+    name,
+    price,
+    changePercent: Number.isFinite(changePercent) ? changePercent : 0,
+    quoteTime: confirmedDate,
+    source,
+    syncedAt,
+    priceSource: 'confirmed',
+    confirmedPrice: price,
+    confirmedDate,
+  };
+};
+
+export const parseEastmoneyFundQuoteResponse = (
+  content: string,
+  code: string,
+  name = '',
+  syncedAt = new Date().toISOString(),
+): AssetQuote | null => {
+  try {
+    const payload = JSON.parse(content) as {
+      Data?: { LSJZList?: Array<{ FSRQ?: string; DWJZ?: string; JZZZL?: string }> };
+      ErrCode?: number;
+    };
+    const latest = payload.Data?.LSJZList?.[0];
+    if (payload.ErrCode !== 0 || !latest) {
+      return null;
+    }
+    return buildConfirmedFundQuote({
+      code,
+      name,
+      price: Number(latest.DWJZ || 0),
+      changePercent: Number(latest.JZZZL || 0),
+      confirmedDate: latest.FSRQ || '',
+      source: 'eastmoney-f10',
+      syncedAt,
+    });
+  } catch {
+    return null;
+  }
+};
+
+export const parseSinaFundQuoteResponse = (
+  content: string,
+  code: string,
+  name = '',
+  syncedAt = new Date().toISOString(),
+): AssetQuote | null => {
+  try {
+    const payload = JSON.parse(content) as {
+      result?: { status?: { code?: number }; data?: { data?: Array<{ fbrq?: string; jjjz?: string }> } };
+    };
+    const rows = payload.result?.data?.data ?? [];
+    const latest = rows[0];
+    const previousPrice = Number(rows[1]?.jjjz || 0);
+    const price = Number(latest?.jjjz || 0);
+    if (payload.result?.status?.code !== 0 || !latest) {
+      return null;
+    }
+    return buildConfirmedFundQuote({
+      code,
+      name,
+      price,
+      changePercent: previousPrice > 0 ? ((price - previousPrice) / previousPrice) * 100 : 0,
+      confirmedDate: (latest.fbrq || '').split(' ')[0],
+      source: 'sina-fund',
+      syncedAt,
+    });
+  } catch {
+    return null;
+  }
+};
+
+export const parseTencentFundQuoteResponse = (
+  content: string,
+  expectedCode: string,
+  fallbackName = '',
+  syncedAt = new Date().toISOString(),
+): AssetQuote | null => {
+  const match = content.match(/v_jj(\d{6})="([^"]*)";/);
+  if (!match) {
+    return null;
+  }
+  const fields = match[2].split('~');
+  return buildConfirmedFundQuote({
+    code: match[1] || expectedCode,
+    name: fields[1] || fallbackName,
+    price: Number(fields[5] || 0),
+    changePercent: Number(fields[7] || 0),
+    confirmedDate: fields[8] || '',
+    source: 'tencent-fund',
+    syncedAt,
+  });
+};
+
 export const parseTencentStockQuoteResponse = (content: string, syncedAt = new Date().toISOString()): AssetQuote[] => {
   const quotes: AssetQuote[] = [];
   const pattern = /v_(sh|sz)(\d{6})="([^"]*)";/g;

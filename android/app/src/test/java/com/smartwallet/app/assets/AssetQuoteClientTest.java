@@ -52,6 +52,53 @@ public class AssetQuoteClientTest {
     }
 
     @Test
+    public void parsesEastmoneyConfirmedFundQuote() {
+        AssetQuoteClient client = new AssetQuoteClient();
+        JSONObject quote = client.parseEastmoneyFundQuote(
+            "{\"Data\":{\"LSJZList\":[{\"FSRQ\":\"2026-07-31\",\"DWJZ\":\"1.3115\",\"JZZZL\":\"0.05\"}]},\"ErrCode\":0}",
+            "004388",
+            "鹏华丰享债券",
+            "2026-08-01T08:00:00.000Z"
+        );
+
+        assertEquals(1.3115d, quote.optDouble("price"), 0.0001d);
+        assertEquals("2026-07-31", quote.optString("confirmedDate"));
+        assertEquals("confirmed", quote.optString("priceSource"));
+        assertEquals("eastmoney-f10", quote.optString("source"));
+    }
+
+    @Test
+    public void parsesSinaConfirmedFundQuote() {
+        AssetQuoteClient client = new AssetQuoteClient();
+        JSONObject quote = client.parseSinaFundQuote(
+            "{\"result\":{\"status\":{\"code\":0},\"data\":{\"data\":[{\"fbrq\":\"2026-07-31 00:00:00\",\"jjjz\":\"1.3115\"},{\"fbrq\":\"2026-07-30 00:00:00\",\"jjjz\":\"1.3109\"}]}}}",
+            "004388",
+            "鹏华丰享债券",
+            "2026-08-01T08:00:00.000Z"
+        );
+
+        assertEquals(1.3115d, quote.optDouble("price"), 0.0001d);
+        assertEquals("2026-07-31", quote.optString("confirmedDate"));
+        assertEquals("sina-fund", quote.optString("source"));
+    }
+
+    @Test
+    public void parsesTencentConfirmedFundQuote() {
+        AssetQuoteClient client = new AssetQuoteClient();
+        JSONObject quote = client.parseTencentFundQuote(
+            "v_jj004388=\"004388~鹏华丰享债券~0.0000~0.0000~~1.3115~1.4725~0.0458~2026-07-31~\";",
+            "004388",
+            "",
+            "2026-08-01T08:00:00.000Z"
+        );
+
+        assertEquals("鹏华丰享债券", quote.optString("name"));
+        assertEquals(1.3115d, quote.optDouble("price"), 0.0001d);
+        assertEquals(0.0458d, quote.optDouble("changePercent"), 0.0001d);
+        assertEquals("tencent-fund", quote.optString("source"));
+    }
+
+    @Test
     public void ignoresInvalidFundQuote() {
         AssetQuoteClient client = new AssetQuoteClient();
         assertTrue(client.parseFundQuote("bad response", "2026-06-18T08:00:00.000Z") == null);

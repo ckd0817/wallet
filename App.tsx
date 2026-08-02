@@ -14,6 +14,8 @@ import {
   AutoBookkeepingSettings,
   CaptureAttemptLog,
   Category,
+  FundQuoteSourceOption,
+  FundQuoteSourceTestResult,
   LLMConfig,
   LLMConfigTestResult,
   RecurringFrequency,
@@ -56,6 +58,7 @@ import {
   saveNativeAssetHolding,
   syncNativeAssetQuotes,
   syncWebAssetQuotes,
+  testNativeFundQuoteSource,
 } from './services/walletStore';
 import { mergeBackupData } from './services/dataBackup';
 import {
@@ -96,6 +99,7 @@ const App: React.FC = () => {
   const [isSyncingAssets, setIsSyncingAssets] = useState(false);
   const [assetSyncNotice, setAssetSyncNotice] = useState('');
   const isHydratingRef = useRef(false);
+  const llmConfigSaveRequestRef = useRef(0);
 
   const getTodayKey = () => {
     const today = new Date();
@@ -257,8 +261,8 @@ const App: React.FC = () => {
       let hasUpdates = false;
       const fetchHoldingQuote = async (holding: AssetHolding) => {
         const quotes = runningInAndroid
-          ? await syncNativeAssetQuotes([holding])
-          : await syncWebAssetQuotes([holding]);
+          ? await syncNativeAssetQuotes([holding], snapshot.appSettings.fundQuoteSource)
+          : await syncWebAssetQuotes([holding], snapshot.appSettings.fundQuoteSource);
         quotes.forEach((quote) => {
           quoteMap.set(`${quote.assetType}:${quote.code}`, quote);
         });
@@ -846,12 +850,17 @@ const App: React.FC = () => {
   };
 
   const handleUpdateLLMConfig = async (config: LLMConfig) => {
-    if (runningInAndroid) {
-      applySnapshot(await saveNativeLlmConfig(config));
+    setLlmConfig(config);
+
+    if (!runningInAndroid) {
       return;
     }
 
-    setLlmConfig(config);
+    const requestId = ++llmConfigSaveRequestRef.current;
+    const savedSnapshot = await saveNativeLlmConfig(config);
+    if (requestId === llmConfigSaveRequestRef.current) {
+      setLlmConfig(savedSnapshot.llmConfig);
+    }
   };
 
   const handleOpenAccessibilitySettings = async () => {
@@ -891,8 +900,8 @@ const App: React.FC = () => {
         const recurringResult = await processAssetRecurringPlans(baseSnapshot);
         const workingSnapshot = recurringResult.snapshot;
         const quotes = runningInAndroid
-          ? await syncNativeAssetQuotes(workingSnapshot.assetHoldings)
-          : await syncWebAssetQuotes(workingSnapshot.assetHoldings);
+          ? await syncNativeAssetQuotes(workingSnapshot.assetHoldings, workingSnapshot.appSettings.fundQuoteSource)
+          : await syncWebAssetQuotes(workingSnapshot.assetHoldings, workingSnapshot.appSettings.fundQuoteSource);
         const quoteMap = new Map<string, AssetQuote>(
           workingSnapshot.assetQuoteCache.map((quote) => [`${quote.assetType}:${quote.code}`, quote]),
         );
@@ -1099,17 +1108,35 @@ const App: React.FC = () => {
   };
 
   const handleUpdateAppSettings = async (settings: AppSettings) => {
+    const fundQuoteSourceChanged = settings.fundQuoteSource !== appSettings.fundQuoteSource;
     const nextSnapshot = normalizeSnapshot({
       ...buildCurrentSnapshot(),
       appSettings: settings,
     });
 
     if (runningInAndroid) {
-      applySnapshot(await saveNativeSnapshot(nextSnapshot));
+      const savedSnapshot = await saveNativeSnapshot(nextSnapshot);
+      applySnapshot(savedSnapshot);
+      if (fundQuoteSourceChanged) {
+        await syncAssetQuotesForSnapshot(savedSnapshot.assetHoldings, savedSnapshot);
+      }
       return;
     }
 
     applySnapshot(nextSnapshot);
+    if (fundQuoteSourceChanged) {
+      await syncAssetQuotesForSnapshot(nextSnapshot.assetHoldings, nextSnapshot);
+    }
+  };
+
+  const handleTestFundQuoteSource = async (
+    source: FundQuoteSourceOption,
+  ): Promise<FundQuoteSourceTestResult> => {
+    if (!runningInAndroid) {
+      return { source, ok: false, message: '当前环境不可检测' };
+    }
+    const target = assetHoldings.find((holding) => holding.assetType === 'fund');
+    return testNativeFundQuoteSource(source, target?.code || '004388', target?.name || '');
   };
 
   const renderContent = () => {
@@ -1160,6 +1187,7 @@ const App: React.FC = () => {
             captureLogs={captureLogs}
             onUpdateLLMConfig={handleUpdateLLMConfig}
             onUpdateAppSettings={handleUpdateAppSettings}
+            onTestFundQuoteSource={handleTestFundQuoteSource}
             onImport={handleImportBackup}
             onDeleteRecurring={handleDeleteRecurring}
             onOpenAccessibilitySettings={handleOpenAccessibilitySettings}
