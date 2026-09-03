@@ -224,6 +224,8 @@ export interface AppSettings {
 }
 
 export interface WalletSnapshot {
+  localRevision?: number;
+  cloudAccountId?: string;
   storeVersion: number;
   migratedFromWebStorage: boolean;
   transactions: Transaction[];
@@ -252,7 +254,7 @@ export interface WalletBackupData {
 
 export interface WalletBackupFile {
   format: 'smartwallet-backup';
-  version: 1;
+  version: 2;
   exportedAt: string;
   data: WalletBackupData;
 }

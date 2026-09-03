@@ -1,0 +1,11 @@
+{
+  "name": "smartwallet-server", "version": "1.0.0", "private": true, "type": "module",
+  "engines": { "node": ">=24" },
+  "scripts": {
+    "build": "tsc", "start": "node dist/index.js",
+    "test": "tsx --test test/*.test.ts",
+    "migrate": "tsx src/admin.ts migrate", "admin": "tsx src/admin.ts"
+  },
+  "dependencies": { "argon2": "^0.44.0", "fastify": "^5.6.0", "pg": "^8.16.3", "zod": "^4.1.0" },
+  "devDependencies": { "@types/node": "^24.0.0", "@types/pg": "^8.15.5", "tsx": "^4.20.0", "typescript": "~5.8.2" }
+}

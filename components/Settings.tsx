@@ -40,6 +40,7 @@ import {
 import { buildBackupPayload, parseBackupFile } from '../services/dataBackup';
 import { DEFAULT_CAPTURE_PROMPT, isNativeIgnoringBatteryOptimizations, requestNativeIgnoreBatteryOptimization } from '../services/walletStore';
 import { getRetryableCaptureLogIds } from './captureLogRetry';
+import CloudAccount from './CloudAccount';
 
 const FUND_QUOTE_SOURCES: Array<{
   id: FundQuoteSourceOption;
@@ -67,7 +68,7 @@ interface SettingsProps {
   autoBookkeepingSettings: AutoBookkeepingSettings;
   appSettings: AppSettings;
   captureLogs: CaptureAttemptLog[];
-  onImport: (data: WalletBackupData, mode: 'append' | 'overwrite') => void;
+  onImport: (data: WalletBackupData, mode: 'append' | 'overwrite') => Promise<void>;
   onDeleteRecurring: (id: string) => void;
   onUpdateLLMConfig: (config: LLMConfig) => void;
   onUpdateAppSettings: (settings: AppSettings) => Promise<void> | void;
@@ -273,7 +274,7 @@ const Settings: React.FC<SettingsProps> = ({
     }
 
     const reader = new FileReader();
-    reader.onload = (loadEvent) => {
+    reader.onload = async (loadEvent) => {
       const content = loadEvent.target?.result as string;
       if (!content) {
         return;
@@ -281,12 +282,12 @@ const Settings: React.FC<SettingsProps> = ({
 
       try {
         const importedBackup = parseBackupFile(content);
-        if (importedBackup.transactions.length === 0 && importedBackup.recurringProfiles.length === 0) {
+        if (Object.values(importedBackup).every(records => records.length === 0)) {
           alert('备份文件中没有可导入的数据。');
           return;
         }
 
-        onImport(importedBackup, importMode);
+        await onImport(importedBackup, importMode);
       } catch (error) {
         console.error('Import failed:', error);
         alert(error instanceof Error ? error.message : '未能解析备份文件，请检查 JSON 格式。');
@@ -394,6 +395,7 @@ const Settings: React.FC<SettingsProps> = ({
 
   return (
     <div className="flex flex-col h-full space-y-8 animate-slide-up pb-32">
+      {isAndroidNative && <CloudAccount />}
       <section>
         <SectionHeader title="截图自动记账" />
 

@@ -4,6 +4,7 @@ const config: CapacitorConfig = {
   appId: 'com.smartwallet.app',
   appName: '记账',
   webDir: 'dist',
+  loggingBehavior: 'none',
   plugins: {
     Filesystem: {
       permissions: ['read', 'write']

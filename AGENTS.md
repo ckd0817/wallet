@@ -19,15 +19,20 @@
 - 只要本项目代码有改动，并且变更会影响 Android 实际运行结果，就默认重新打包并安装到我的手机上。
 - 默认使用 `E:\AndroidStudioSDK\platform-tools\adb.exe` 安装。
 - 默认覆盖安装到当前已连接并已授权的真机，不要每次额外询问。
-- Release 签名文件路径：`E:\Android key\key`
-- Release key alias：`key0`
-- Release 证书：`CN=Chenkaida`
-- Release keystore 密码和 key 密码不要写入仓库；打包时向用户确认或使用当前会话已确认的密码。
-- 当前 Gradle release 产物默认是未签名 APK：`android\app\build\outputs\apk\release\app-release-unsigned.apk`
-- 正式 release 包需要手动执行 `zipalign` 和 `apksigner`，默认使用最新 Android build-tools，例如：`E:\AndroidStudioSDK\build-tools\36.1.0`
-- 手动签名输出路径：`android\app\build\outputs\apk\release\app-release-signed.apk`
-- 签名后使用 `apksigner verify --verbose --print-certs android\app\build\outputs\apk\release\app-release-signed.apk` 验证。
-- 如果手机上安装的是 debug 包，安装 signed release 可能因签名不同失败，需要先卸载旧包再安装 release。
+- 本项目仅供内部使用，默认始终构建和分发 Debug APK，使用 `assembleDebug`。
+- Debug 产物：`android\app\build\outputs\apk\debug\app-debug.apk`。
+- 保持 `com.smartwallet.app` 应用 ID、可调试状态及本机固定 Debug 签名；不得重新生成现有 Debug keystore。
+- 用 `adb install -r` 覆盖安装，支持 `adb shell run-as com.smartwallet.app` 查看私有数据。
+- 不需要 Release 打包、Release 签名密码或正式发布流程。
+- 安装前核对签名；不兼容时保留旧应用，先完成并校验数据备份，不直接卸载。
+
+## 数据迁移与云端
+
+- 当前唯一需要继承的数据是用户手机上的账本，允许为新架构重新设计格式。
+- 升级前副本保存在仓库外 `E:\WalletBackups\2026-09-04-before-cloud`，包含原 JSON、应用文件归档与 SHA-256 校验清单。
+- 迁移验收必须核对原有账单、分类、持仓、交易和收益历史的展示结果；不得因解析失败清空原数据。
+- Android 数据库为 `wallet-v2.db`；账本修改和待上传操作在同一 SQLite 事务中保存。
+- 数据库凭据、模型密钥、登录密码、服务器主密钥和用户数据副本均不得提交到 Git。
 
 ## 产品文案记忆
 

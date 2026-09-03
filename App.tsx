@@ -55,12 +55,16 @@ import {
   retryNativeCaptureLog,
   analyzeNativeAssetScreenshot,
   deleteNativeAssetHolding,
+  deleteNativeAssetRecurringPlan,
   saveNativeAssetHolding,
+  saveNativeAssetRecurringPlan,
   syncNativeAssetQuotes,
   syncWebAssetQuotes,
   testNativeFundQuoteSource,
 } from './services/walletStore';
 import { mergeBackupData } from './services/dataBackup';
+import { Cloud, getCloudStatus } from './services/cloudSync';
+import { getNativeAccountId } from './services/nativeScope';
 import {
   advanceAssetRecurringPlanPastDate,
   applyAssetRecurringPurchaseWithQuote,
@@ -79,7 +83,7 @@ const App: React.FC = () => {
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
   const [pendingEditTransactionId, setPendingEditTransactionId] = useState('');
 
-  const [snapshotMeta, setSnapshotMeta] = useState<Pick<WalletSnapshot, 'storeVersion' | 'migratedFromWebStorage'>>({
+  const [snapshotMeta, setSnapshotMeta] = useState<Pick<WalletSnapshot, 'storeVersion' | 'migratedFromWebStorage' | 'localRevision' | 'cloudAccountId'>>({
     storeVersion: 1,
     migratedFromWebStorage: false,
   });
@@ -100,6 +104,10 @@ const App: React.FC = () => {
   const [assetSyncNotice, setAssetSyncNotice] = useState('');
   const isHydratingRef = useRef(false);
   const llmConfigSaveRequestRef = useRef(0);
+  const llmConfigPendingRef = useRef(0);
+  const appliedRevisionRef = useRef({accountId: '', revision: 0});
+  const hasLoadedRef = useRef(false);
+  const [storageError, setStorageError] = useState('');
 
   const getTodayKey = () => {
     const today = new Date();
@@ -107,9 +115,18 @@ const App: React.FC = () => {
   };
 
   const applySnapshot = useCallback((snapshot: WalletSnapshot) => {
+    if (snapshot.cloudAccountId) {
+      if (snapshot.cloudAccountId !== getNativeAccountId()) return;
+      if (appliedRevisionRef.current.accountId === snapshot.cloudAccountId &&
+          (snapshot.localRevision ?? 0) < appliedRevisionRef.current.revision) return;
+      appliedRevisionRef.current = {accountId: snapshot.cloudAccountId, revision: snapshot.localRevision ?? 0};
+    }
+    hasLoadedRef.current = true;
     setSnapshotMeta({
       storeVersion: snapshot.storeVersion,
       migratedFromWebStorage: snapshot.migratedFromWebStorage,
+      localRevision: snapshot.localRevision,
+      cloudAccountId: snapshot.cloudAccountId,
     });
     setTransactions(snapshot.transactions);
     setCaptureLogs(snapshot.captureLogs);
@@ -120,7 +137,7 @@ const App: React.FC = () => {
     setAssetRecurringPlans(snapshot.assetRecurringPlans);
     setAssetPerformanceHistory(snapshot.assetPerformanceHistory);
     setAssetTradeRecords(snapshot.assetTradeRecords);
-    setLlmConfig(snapshot.llmConfig);
+    if (llmConfigPendingRef.current === 0) setLlmConfig(snapshot.llmConfig);
     setAppSettings(snapshot.appSettings);
     setAutoBookkeepingSettings(snapshot.autoBookkeepingSettings);
   }, []);
@@ -152,14 +169,16 @@ const App: React.FC = () => {
   const processRecurringTransactions = useCallback((profiles: RecurringProfile[], currentTransactions: Transaction[]) => {
     const today = new Date().toISOString().split('T')[0];
     const newTransactions: Transaction[] = [];
+    const existingIds = new Set(currentTransactions.map(transaction => transaction.id));
     const updatedProfiles = profiles.map((profile) => ({ ...profile }));
     let hasUpdates = false;
 
     updatedProfiles.forEach((profile) => {
       while (profile.nextDueDate <= today) {
         hasUpdates = true;
-        newTransactions.push({
-          id: uuidv4(),
+        const executionId = 'recurring:' + profile.id + ':' + profile.nextDueDate;
+        if (!existingIds.has(executionId)) newTransactions.push({
+          id: executionId,
           amount: profile.amount,
           type: profile.type,
           categoryId: profile.categoryId,
@@ -169,6 +188,7 @@ const App: React.FC = () => {
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
         });
+        existingIds.add(executionId);
         profile.nextDueDate = calculateNextDate(profile.nextDueDate, profile.frequency);
       }
     });
@@ -181,6 +201,8 @@ const App: React.FC = () => {
       normalizeSnapshot({
         storeVersion: snapshotMeta.storeVersion,
         migratedFromWebStorage: snapshotMeta.migratedFromWebStorage,
+        localRevision: snapshotMeta.localRevision,
+        cloudAccountId: snapshotMeta.cloudAccountId,
         transactions,
         captureLogs,
         categories,
@@ -215,6 +237,49 @@ const App: React.FC = () => {
     const snapshot = normalizeSnapshot(await loadNativeSnapshot());
     applySnapshot(snapshot);
   }, [applySnapshot]);
+
+  useEffect(() => {
+    if (!runningInAndroid) return;
+    let disposed = false;
+    let previousAccount = getNativeAccountId();
+    const update = async () => {
+      const status = await getCloudStatus();
+      if (disposed) return;
+      if (status.accountId !== previousAccount) {
+        previousAccount = status.accountId;
+        setIsAddModalOpen(false);
+        setEditingTransaction(null);
+        setPendingEditTransactionId('');
+      }
+      await refreshNativeSnapshot();
+    };
+    const listener = Cloud.addListener('cloudChanged', event => {
+      if (event.dataChanged) void update().catch(() => {});
+    });
+    const sync = () => {
+      if (document.visibilityState === 'visible') void Cloud.syncNow().catch(() => {});
+    };
+    const timer = window.setInterval(sync, 60000);
+    window.addEventListener('online', sync);
+    document.addEventListener('visibilitychange', sync);
+    void getCloudStatus().then(sync).catch(() => {});
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+      window.removeEventListener('online', sync);
+      document.removeEventListener('visibilitychange', sync);
+      void listener.then(handle => handle.remove());
+    };
+  }, [runningInAndroid, refreshNativeSnapshot]);
+
+  useEffect(() => {
+    const onError = (event: PromiseRejectionEvent) => {
+      event.preventDefault();
+      setStorageError(event.reason instanceof Error ? event.reason.message : '操作失败');
+    };
+    window.addEventListener('unhandledrejection', onError);
+    return () => window.removeEventListener('unhandledrejection', onError);
+  }, []);
 
   const mergeWithLegacyWebStorage = useCallback(
     async (nativeSnapshot: WalletSnapshot) => {
@@ -392,7 +457,7 @@ const App: React.FC = () => {
             };
             Object.assign(plan, advanceAssetRecurringPlanPastDate(plan, executionDate));
             tradeRecords.unshift({
-              id: uuidv4(),
+              id: 'asset-recurring:' + plan.id + ':' + executionDate,
               holdingId: currentHolding.id,
               assetType: currentHolding.assetType,
               code: currentHolding.code,
@@ -412,7 +477,7 @@ const App: React.FC = () => {
           } else {
             Object.assign(plan, advanceAssetRecurringPlanPastDate(plan, executionDate));
             tradeRecords.unshift({
-              id: uuidv4(),
+              id: 'asset-recurring:' + plan.id + ':' + executionDate,
               holdingId: currentHolding.id,
               assetType: currentHolding.assetType,
               code: currentHolding.code,
@@ -440,7 +505,7 @@ const App: React.FC = () => {
         holdings[holdingIndex] = execution.holding;
         Object.assign(plan, execution.plan);
         tradeRecords.unshift({
-          id: uuidv4(),
+          id: 'asset-recurring:' + plan.id + ':' + (execution.executionDate ?? today),
           holdingId: currentHolding.id,
           assetType: currentHolding.assetType,
           code: currentHolding.code,
@@ -579,6 +644,7 @@ const App: React.FC = () => {
       isHydratingRef.current = true;
 
       try {
+        if (runningInAndroid) await getCloudStatus();
         let initialSnapshot = runningInAndroid ? await loadNativeSnapshot() : normalizeSnapshot(loadWebSnapshot());
         if (runningInAndroid) {
           initialSnapshot = await mergeWithLegacyWebStorage(initialSnapshot);
@@ -620,6 +686,9 @@ const App: React.FC = () => {
 
           queueDeepLink(await consumePendingNativeDeepLink());
         }
+      } catch (error) {
+        setStorageError(error instanceof Error ? error.message : '数据读取失败');
+        return;
       } finally {
         if (isMounted) {
           setIsInitialized(true);
@@ -807,9 +876,15 @@ const App: React.FC = () => {
   };
 
   const handleImportBackup = async (importedData: WalletBackupData, mode: 'append' | 'overwrite') => {
-    if (mode === 'overwrite' && !window.confirm('警告：覆盖模式将替换现有交易、分类和周期规则。继续吗？')) {
+    if (runningInAndroid && mode === 'overwrite' && (await getCloudStatus()).loggedIn) {
+      const ticket = await Cloud.prepareRestore();
+      if (!window.confirm('将替换此账户所有设备的账本。继续？')) return;
+      await Cloud.restore({ticket, data: importedData});
+      await refreshNativeSnapshot();
+      alert('恢复完成');
       return;
     }
+    if (mode === 'overwrite' && !window.confirm('将替换本机账本。继续？')) return;
 
     const mergedData = mergeBackupData(
       {
@@ -837,7 +912,7 @@ const App: React.FC = () => {
     });
 
     if (runningInAndroid) {
-      applySnapshot(await saveNativeSnapshot(nextSnapshot));
+      applySnapshot(await saveNativeSnapshot(nextSnapshot, 'append'));
     } else {
       applySnapshot(nextSnapshot);
     }
@@ -857,9 +932,12 @@ const App: React.FC = () => {
     }
 
     const requestId = ++llmConfigSaveRequestRef.current;
-    const savedSnapshot = await saveNativeLlmConfig(config);
-    if (requestId === llmConfigSaveRequestRef.current) {
-      setLlmConfig(savedSnapshot.llmConfig);
+    llmConfigPendingRef.current++;
+    try {
+      const savedSnapshot = await saveNativeLlmConfig(config);
+      if (requestId === llmConfigSaveRequestRef.current) setLlmConfig(savedSnapshot.llmConfig);
+    } finally {
+      llmConfigPendingRef.current--;
     }
   };
 
@@ -1067,7 +1145,7 @@ const App: React.FC = () => {
     });
 
     if (runningInAndroid) {
-      const savedSnapshot = await saveNativeSnapshot(nextSnapshot);
+      const savedSnapshot = await saveNativeAssetRecurringPlan(plan);
       applySnapshot(savedSnapshot);
       void syncAssetQuotesForSnapshot(savedSnapshot.assetHoldings, savedSnapshot);
       return;
@@ -1084,7 +1162,7 @@ const App: React.FC = () => {
     });
 
     if (runningInAndroid) {
-      applySnapshot(await saveNativeSnapshot(nextSnapshot));
+      applySnapshot(await deleteNativeAssetRecurringPlan(id));
       return;
     }
 
@@ -1223,6 +1301,13 @@ const App: React.FC = () => {
     }
   };
 
+  if (storageError && !hasLoadedRef.current) {
+    return <div className="min-h-screen flex flex-col items-center justify-center gap-4 bg-background p-6">
+      <p role="alert" className="text-danger">{storageError}</p>
+      <button onClick={() => window.location.reload()} className="rounded-xl bg-primary px-6 py-3 text-white">重试</button>
+    </div>;
+  }
+
   return (
     <div className="min-h-screen bg-background text-primary font-sans relative">
       <header className="sticky top-0 z-30 bg-background/80 backdrop-blur-xl border-b border-border px-6 h-16 flex items-center justify-between transition-all">
@@ -1233,6 +1318,9 @@ const App: React.FC = () => {
         className="max-w-2xl mx-auto p-4 pb-20 min-h-screen animate-fade-in"
         style={{ paddingBottom: 'calc(5rem + env(safe-area-inset-bottom))' }}
       >
+        {storageError && <div role="alert" className="mb-4 flex items-center justify-between rounded-xl bg-red-50 px-4 py-3 text-sm text-danger">
+          <span>{storageError}</span><button onClick={() => setStorageError('')} className="ml-3">关闭</button>
+        </div>}
         {renderContent()}
       </main>
 

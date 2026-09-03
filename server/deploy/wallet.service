@@ -1,0 +1,22 @@
+[Unit]
+Description=SmartWallet API
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=wallet
+Group=wallet
+WorkingDirectory=/opt/wallet/server
+EnvironmentFile=/etc/wallet/server.env
+Environment=NODE_ENV=production
+ExecStart=/opt/node24/bin/node dist/index.js
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target

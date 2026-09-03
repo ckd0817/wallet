@@ -26,6 +26,7 @@ public final class CaptureProcessingEngine {
     private final CaptureLogFactory captureLogFactory = new CaptureLogFactory();
     private final SimpleDateFormat dateFormatter = new SimpleDateFormat("yyyy-MM-dd", Locale.US);
     private final SimpleDateFormat timestampFormatter = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US);
+    private final ThreadLocal<WalletRepository> captureAccount = new ThreadLocal<>();
 
     public CaptureProcessingEngine(Context context) {
         this.appContext = context.getApplicationContext();
@@ -60,6 +61,7 @@ public final class CaptureProcessingEngine {
     }
 
     private void processCaptureBytes(byte[] pngBytes, String imagePath) {
+        captureAccount.set(WalletRepository.getInstance(appContext));
         JSONObject captureLog = null;
         try {
             captureLog = captureLogFactory.createPendingLog(imagePath);
@@ -79,15 +81,19 @@ public final class CaptureProcessingEngine {
             repository().upsertTransaction(transaction);
             repository().upsertCaptureLog(captureLogFactory.createCompletedLog(captureLog, outcome, transaction));
             repository().saveAutoBookkeepingSettings(statusUpdate("", System.currentTimeMillis()));
-            NotificationHelper.showCaptureResult(appContext, transaction);
-            ScreenCaptureBookkeepingPlugin.emitCaptureRecorded(transaction);
-            emitStatus();
+            if (repository().isActive()) {
+                NotificationHelper.showCaptureResult(appContext, transaction);
+                ScreenCaptureBookkeepingPlugin.emitCaptureRecorded(transaction);
+                emitStatus();
+            }
         } catch (Exception exception) {
             Log.e(TAG, "Capture analysis failed", exception);
             if (captureLog != null) {
                 repository().upsertCaptureLog(captureLogFactory.createUnexpectedFailureLog(captureLog, resolveExceptionMessage(exception)));
             }
             updateError(resolveExceptionMessage(exception));
+        } finally {
+            captureAccount.remove();
         }
     }
 
@@ -129,8 +135,10 @@ public final class CaptureProcessingEngine {
 
     private void updateError(String message) {
         repository().saveAutoBookkeepingSettings(statusUpdate(message, 0));
-        NotificationHelper.showCaptureFailure(appContext, message);
-        emitStatus();
+        if (repository().isActive()) {
+            NotificationHelper.showCaptureFailure(appContext, message);
+            emitStatus();
+        }
     }
 
     private JSONObject statusUpdate(String lastError, long lastCaptureAt) {
@@ -148,7 +156,8 @@ public final class CaptureProcessingEngine {
     }
 
     private WalletRepository repository() {
-        return WalletRepository.getInstance(appContext);
+        WalletRepository bound = captureAccount.get();
+        return bound == null ? WalletRepository.getInstance(appContext) : bound;
     }
 
     private String saveCaptureImage(byte[] pngBytes) {

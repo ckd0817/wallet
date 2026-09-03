@@ -1,3 +1,4 @@
+import { getNativeAccountId, setNativeAccountId } from './nativeScope';
 import { Capacitor, PluginListenerHandle, registerPlugin } from '@capacitor/core';
 
 import { DEFAULT_CATEGORIES, mergeDefaultCategories } from '../constants';
@@ -50,23 +51,25 @@ const STORAGE_KEYS = {
 
 interface WalletDataPlugin {
   loadSnapshot(): Promise<WalletSnapshot>;
-  saveSnapshot(options: { snapshot: WalletSnapshot }): Promise<WalletSnapshot>;
-  upsertTransaction(options: { transaction: Transaction }): Promise<WalletSnapshot>;
-  deleteTransaction(options: { id: string }): Promise<WalletSnapshot>;
-  replaceTransactions(options: { transactions: Transaction[] }): Promise<WalletSnapshot>;
-  upsertCategory(options: { category: Category }): Promise<WalletSnapshot>;
-  upsertRecurringProfile(options: { recurringProfile: RecurringProfile }): Promise<WalletSnapshot>;
-  deleteRecurringProfile(options: { id: string }): Promise<WalletSnapshot>;
-  saveLlmConfig(options: { llmConfig: LLMConfig }): Promise<WalletSnapshot>;
-  upsertAssetHolding(options: { assetHolding: AssetHolding }): Promise<WalletSnapshot>;
-  deleteAssetHolding(options: { id: string }): Promise<WalletSnapshot>;
-  syncAssetQuotes(options: { assetHoldings: AssetHolding[]; fundQuoteSource: FundQuoteSource }): Promise<{ quotes: AssetQuote[] }>;
-  testFundQuoteSource(options: {
+  saveSnapshot(options: { accountId?: string; snapshot: WalletSnapshot; mode?: string }): Promise<WalletSnapshot>;
+  upsertTransaction(options: { accountId?: string; transaction: Transaction }): Promise<WalletSnapshot>;
+  deleteTransaction(options: { accountId?: string; id: string }): Promise<WalletSnapshot>;
+  replaceTransactions(options: { accountId?: string; transactions: Transaction[] }): Promise<WalletSnapshot>;
+  upsertCategory(options: { accountId?: string; category: Category }): Promise<WalletSnapshot>;
+  upsertRecurringProfile(options: { accountId?: string; recurringProfile: RecurringProfile }): Promise<WalletSnapshot>;
+  deleteRecurringProfile(options: { accountId?: string; id: string }): Promise<WalletSnapshot>;
+  saveLlmConfig(options: { accountId?: string; llmConfig: LLMConfig }): Promise<WalletSnapshot>;
+  upsertAssetHolding(options: { accountId?: string; assetHolding: AssetHolding }): Promise<WalletSnapshot>;
+  deleteAssetHolding(options: { accountId?: string; id: string }): Promise<WalletSnapshot>;
+  upsertAssetRecurringPlan(options: { accountId?: string; assetRecurringPlan: AssetRecurringPlan }): Promise<WalletSnapshot>;
+  deleteAssetRecurringPlan(options: { accountId?: string; id: string }): Promise<WalletSnapshot>;
+  syncAssetQuotes(options: { accountId?: string; assetHoldings: AssetHolding[]; fundQuoteSource: FundQuoteSource }): Promise<{ quotes: AssetQuote[] }>;
+  testFundQuoteSource(options: { accountId?: string;
     source: FundQuoteSourceOption;
     code: string;
     name: string;
   }): Promise<FundQuoteSourceTestResult>;
-  analyzeAssetScreenshot(options: { imageBase64: string }): Promise<AssetScreenshotAnalysisResult>;
+  analyzeAssetScreenshot(options: { accountId?: string; imageBase64: string }): Promise<AssetScreenshotAnalysisResult>;
 }
 
 interface ScreenCaptureBookkeepingPlugin {
@@ -420,40 +423,50 @@ export const normalizeSnapshot = (snapshot?: Partial<WalletSnapshot> | null): Wa
   };
 };
 
-export const loadNativeSnapshot = async () => normalizeSnapshot(await WalletData.loadSnapshot());
+export const loadNativeSnapshot = async () => {
+  const snapshot = normalizeSnapshot(await WalletData.loadSnapshot());
+  setNativeAccountId(snapshot.cloudAccountId ?? 'local');
+  return snapshot;
+};
 
-export const saveNativeSnapshot = async (snapshot: WalletSnapshot) =>
-  normalizeSnapshot(await WalletData.saveSnapshot({ snapshot }));
+export const saveNativeSnapshot = async (snapshot: WalletSnapshot, mode: "mutate" | "append" = "mutate") =>
+  normalizeSnapshot(await WalletData.saveSnapshot({ accountId: getNativeAccountId(), snapshot, mode }));
 
 export const saveNativeTransaction = async (transaction: Transaction) =>
-  normalizeSnapshot(await WalletData.upsertTransaction({ transaction }));
+  normalizeSnapshot(await WalletData.upsertTransaction({ accountId: getNativeAccountId(), transaction }));
 
 export const deleteNativeTransaction = async (id: string) =>
-  normalizeSnapshot(await WalletData.deleteTransaction({ id }));
+  normalizeSnapshot(await WalletData.deleteTransaction({ accountId: getNativeAccountId(), id }));
 
 export const replaceNativeTransactions = async (transactions: Transaction[]) =>
-  normalizeSnapshot(await WalletData.replaceTransactions({ transactions }));
+  normalizeSnapshot(await WalletData.replaceTransactions({ accountId: getNativeAccountId(), transactions }));
 
 export const saveNativeRecurringProfile = async (recurringProfile: RecurringProfile) =>
-  normalizeSnapshot(await WalletData.upsertRecurringProfile({ recurringProfile }));
+  normalizeSnapshot(await WalletData.upsertRecurringProfile({ accountId: getNativeAccountId(), recurringProfile }));
 
 export const deleteNativeRecurringProfile = async (id: string) =>
-  normalizeSnapshot(await WalletData.deleteRecurringProfile({ id }));
+  normalizeSnapshot(await WalletData.deleteRecurringProfile({ accountId: getNativeAccountId(), id }));
 
 export const saveNativeCategory = async (category: Category) =>
-  normalizeSnapshot(await WalletData.upsertCategory({ category }));
+  normalizeSnapshot(await WalletData.upsertCategory({ accountId: getNativeAccountId(), category }));
 
 export const saveNativeLlmConfig = async (llmConfig: LLMConfig) =>
-  normalizeSnapshot(await WalletData.saveLlmConfig({ llmConfig }));
+  normalizeSnapshot(await WalletData.saveLlmConfig({ accountId: getNativeAccountId(), llmConfig }));
 
 export const saveNativeAssetHolding = async (assetHolding: AssetHolding) =>
-  normalizeSnapshot(await WalletData.upsertAssetHolding({ assetHolding }));
+  normalizeSnapshot(await WalletData.upsertAssetHolding({ accountId: getNativeAccountId(), assetHolding }));
 
 export const deleteNativeAssetHolding = async (id: string) =>
-  normalizeSnapshot(await WalletData.deleteAssetHolding({ id }));
+  normalizeSnapshot(await WalletData.deleteAssetHolding({ accountId: getNativeAccountId(), id }));
+
+export const saveNativeAssetRecurringPlan = async (assetRecurringPlan: AssetRecurringPlan) =>
+  normalizeSnapshot(await WalletData.upsertAssetRecurringPlan({ accountId: getNativeAccountId(), assetRecurringPlan }));
+
+export const deleteNativeAssetRecurringPlan = async (id: string) =>
+  normalizeSnapshot(await WalletData.deleteAssetRecurringPlan({ accountId: getNativeAccountId(), id }));
 
 export const syncNativeAssetQuotes = async (assetHoldings: AssetHolding[], fundQuoteSource: FundQuoteSource) => {
-  const result = await WalletData.syncAssetQuotes({ assetHoldings, fundQuoteSource });
+  const result = await WalletData.syncAssetQuotes({ accountId: getNativeAccountId(), assetHoldings, fundQuoteSource });
   return normalizeAssetQuotes(result.quotes);
 };
 
@@ -461,10 +474,10 @@ export const testNativeFundQuoteSource = async (
   source: FundQuoteSourceOption,
   code: string,
   name: string,
-): Promise<FundQuoteSourceTestResult> => WalletData.testFundQuoteSource({ source, code, name });
+): Promise<FundQuoteSourceTestResult> => WalletData.testFundQuoteSource({ accountId: getNativeAccountId(), source, code, name });
 
 export const analyzeNativeAssetScreenshot = async (imageBase64: string): Promise<AssetScreenshotAnalysisResult> =>
-  WalletData.analyzeAssetScreenshot({ imageBase64 });
+  WalletData.analyzeAssetScreenshot({ accountId: getNativeAccountId(), imageBase64 });
 
 export const syncWebAssetQuotes = async (
   assetHoldings: AssetHolding[],

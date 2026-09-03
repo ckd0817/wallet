@@ -4,10 +4,6 @@ import android.content.Context;
 import android.net.Uri;
 import com.smartwallet.app.screencapture.CaptureLogStore;
 import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
-import java.io.InputStreamReader;
-import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
@@ -19,31 +15,37 @@ import org.json.JSONObject;
 
 public class WalletRepository {
 
-    private static final String STORE_FILE_NAME = "wallet-store.json";
     private static final int MAX_CAPTURE_LOGS = 50;
-    private static volatile WalletRepository instance;
+    private static final java.util.Map<String, WalletRepository> instances = new java.util.HashMap<>();
+    private final WalletDatabase database;
+    private final String accountId;
 
-    private final File storeFile;
     private final File appFilesDir;
     private final Object lock = new Object();
     private final SimpleDateFormat isoFormatter;
 
-    private WalletRepository(Context context) {
+    private WalletRepository(Context context, String accountId) {
+        this.database = WalletDatabase.get(context);
+        this.accountId = accountId;
         this.appFilesDir = context.getFilesDir();
-        this.storeFile = new File(appFilesDir, STORE_FILE_NAME);
         this.isoFormatter = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US);
         this.isoFormatter.setTimeZone(TimeZone.getTimeZone("UTC"));
     }
 
-    public static WalletRepository getInstance(Context context) {
-        if (instance == null) {
-            synchronized (WalletRepository.class) {
-                if (instance == null) {
-                    instance = new WalletRepository(context.getApplicationContext());
-                }
-            }
-        }
-        return instance;
+    public static synchronized WalletRepository getInstance(Context context) {
+        String account = WalletDatabase.get(context).activeAccount();
+        return forAccount(context, account);
+    }
+
+    public static synchronized WalletRepository forAccount(Context context, String account) {
+        if (!instances.containsKey(account)) instances.put(account, new WalletRepository(context.getApplicationContext(), account));
+        return instances.get(account);
+    }
+
+    public boolean isActive() { return accountId.equals(database.activeAccount()); }
+
+    public JSONObject saveSnapshot(JSONObject snapshot, String mode) {
+        synchronized (lock) { return database.save(accountId, snapshot, mode); }
     }
 
     public JSONObject loadSnapshot() {
@@ -54,10 +56,7 @@ public class WalletRepository {
 
     public JSONObject saveSnapshot(JSONObject snapshot) {
         synchronized (lock) {
-            JSONObject store = WalletDefaults.ensureDefaults(snapshot);
-            applyCaptureLogRetention(store);
-            writeStoreLocked(store);
-            return cloneObject(store);
+            return database.save(accountId, snapshot, "mutate");
         }
     }
 
@@ -75,7 +74,7 @@ public class WalletRepository {
         synchronized (lock) {
             JSONObject store = readStoreLocked();
             safePut(store, "transactions", removeById(store.optJSONArray("transactions"), id));
-            writeStoreLocked(store);
+            writeStoreLocked(store, true);
             return cloneObject(store);
         }
     }
@@ -84,7 +83,7 @@ public class WalletRepository {
         synchronized (lock) {
             JSONObject store = readStoreLocked();
             safePut(store, "transactions", cloneArray(transactions));
-            writeStoreLocked(store);
+            writeStoreLocked(store, true);
             return cloneObject(store);
         }
     }
@@ -111,7 +110,7 @@ public class WalletRepository {
         synchronized (lock) {
             JSONObject store = readStoreLocked();
             safePut(store, "recurringProfiles", removeById(store.optJSONArray("recurringProfiles"), id));
-            writeStoreLocked(store);
+            writeStoreLocked(store, true);
             return cloneObject(store);
         }
     }
@@ -149,7 +148,7 @@ public class WalletRepository {
                 );
                 safePut(store, "assetRecurringPlans", removeAssetRecurringPlansByHoldingId(store.optJSONArray("assetRecurringPlans"), id));
             }
-            writeStoreLocked(store);
+            writeStoreLocked(store, true);
             return cloneObject(store);
         }
     }
@@ -176,7 +175,7 @@ public class WalletRepository {
         synchronized (lock) {
             JSONObject store = readStoreLocked();
             safePut(store, "assetRecurringPlans", removeById(store.optJSONArray("assetRecurringPlans"), id));
-            writeStoreLocked(store);
+            writeStoreLocked(store, true);
             return cloneObject(store);
         }
     }
@@ -418,68 +417,19 @@ public class WalletRepository {
     }
 
     private JSONObject readStoreLocked() {
-        try {
-            if (!storeFile.exists()) {
-                JSONObject defaults = WalletDefaults.defaultStore();
-                writeStoreLocked(defaults);
-                return defaults;
-            }
-            String content = readFileLocked();
-            if (content == null || content.trim().isEmpty()) {
-                JSONObject defaults = WalletDefaults.defaultStore();
-                writeStoreLocked(defaults);
-                return defaults;
-            }
-            return WalletDefaults.ensureDefaults(new JSONObject(content));
-        } catch (Exception ignored) {
-            JSONObject defaults = WalletDefaults.defaultStore();
-            writeStoreLocked(defaults);
-            return defaults;
-        }
+        return database.load(accountId);
     }
 
     private void writeStoreLocked(JSONObject store) {
-        FileOutputStream outputStream = null;
-        try {
-            outputStream = new FileOutputStream(storeFile, false);
-            outputStream.write(store.toString(2).getBytes(StandardCharsets.UTF_8));
-            outputStream.flush();
-        } catch (Exception ignored) {
-        } finally {
-            if (outputStream != null) {
-                try {
-                    outputStream.close();
-                } catch (Exception ignored) {}
-            }
-        }
+        writeStoreLocked(store, false);
     }
 
-    private String readFileLocked() {
-        FileInputStream inputStream = null;
-        InputStreamReader reader = null;
-        try {
-            inputStream = new FileInputStream(storeFile);
-            reader = new InputStreamReader(inputStream, StandardCharsets.UTF_8);
-            StringBuilder builder = new StringBuilder();
-            char[] buffer = new char[1024];
-            int length;
-            while ((length = reader.read(buffer)) != -1) {
-                builder.append(buffer, 0, length);
-            }
-            return builder.toString();
-        } catch (Exception ignored) {
-            return "";
-        } finally {
-            if (reader != null) {
-                try {
-                    reader.close();
-                } catch (Exception ignored) {}
-            } else if (inputStream != null) {
-                try {
-                    inputStream.close();
-                } catch (Exception ignored) {}
-            }
-        }
+    private void writeStoreLocked(JSONObject store, boolean allowDeletes) {
+        JSONObject saved = database.save(accountId, store, "mutate", allowDeletes);
+        java.util.List<String> keys = new java.util.ArrayList<>();
+        store.keys().forEachRemaining(keys::add);
+        for (String key : keys) store.remove(key);
+        saved.keys().forEachRemaining(key -> safePut(store, key, saved.opt(key)));
     }
 
     private JSONObject cloneObject(JSONObject object) {

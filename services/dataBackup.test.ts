@@ -5,6 +5,21 @@ import { buildBackupPayload, mergeBackupData, parseBackupFile } from './dataBack
 import { AssetHolding, Category, Transaction, WalletSnapshot } from '../types';
 
 describe('dataBackup', () => {
+  it('新备份使用版本 2，拒绝未知版本和重复编号', () => {
+    const payload = buildBackupPayload(buildDefaultSnapshot());
+    expect(payload.version).toBe(2);
+    expect(() => parseBackupFile(JSON.stringify({...payload, version:99}))).toThrow();
+    expect(() => parseBackupFile(JSON.stringify({transactions:[
+      {id:'duplicate',amount:1,type:'expense',categoryId:'food'},
+      {id:'duplicate',amount:2,type:'expense',categoryId:'food'},
+    ]}))).toThrow();
+  });
+
+  it('解析完整文件前校验所有集合，不丢弃无效持仓', () => {
+    expect(() => parseBackupFile(JSON.stringify({assetHoldings:[
+      {id:'broken',assetType:'fund',shares:-1,costAmount:10},
+    ]}))).toThrow();
+  });
   it('keeps capture logs out of JSON backups', () => {
     const payload = buildBackupPayload({
       ...buildDefaultSnapshot(),

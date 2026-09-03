@@ -9,6 +9,7 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(WalletDataPlugin.class);
+        registerPlugin(CloudSyncPlugin.class);
         registerPlugin(ScreenCaptureBookkeepingPlugin.class);
         super.onCreate(savedInstanceState);
         ScreenCaptureBookkeepingPlugin.handleIncomingIntent(getIntent());

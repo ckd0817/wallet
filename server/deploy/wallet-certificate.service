@@ -1,0 +1,5 @@
+[Unit]
+Description=Renew SmartWallet IP certificate
+[Service]
+Type=oneshot
+ExecStart=/opt/wallet-certbot/bin/certbot renew --quiet --deploy-hook "systemctl reload nginx"

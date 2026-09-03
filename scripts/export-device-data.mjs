@@ -1,0 +1,16 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+const adb=process.env.ADB ?? 'E:/AndroidStudioSDK/platform-tools/adb.exe';
+const destination=process.argv[2];
+if(!destination || !path.isAbsolute(destination)) throw new Error('请指定仓库外的绝对备份目录');
+fs.mkdirSync(destination,{recursive:true});
+const archive=path.join(destination,'wallet-device-'+new Date().toISOString().replaceAll(':','-')+'.tar');
+const stop=spawnSync(adb,['shell','am','force-stop','com.smartwallet.app']);
+if(stop.status!==0)throw new Error('停止应用失败');
+const result=spawnSync(adb,['exec-out','run-as','com.smartwallet.app','tar','-cf','-','files','databases','shared_prefs'],{maxBuffer:512*1024*1024});
+if(result.status!==0)throw new Error(result.stderr.toString());
+fs.writeFileSync(archive,result.stdout,{flag:'wx'});
+fs.writeFileSync(archive+'.sha256',createHash('sha256').update(result.stdout).digest('hex'));
+console.log('已导出：'+archive);
