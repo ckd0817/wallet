@@ -9,6 +9,8 @@ import {
   calculateNextAssetRecurringDate,
   isLikelyMarketOpenForHolding,
   mergeAssetPerformanceHistory,
+  normalizeAssetCode,
+  normalizeAssetHolding,
   normalizeAssetImportCandidate,
   parseEastmoneyFundQuoteResponse,
   parseFundQuoteResponse,
@@ -110,6 +112,35 @@ describe('assetEngine', () => {
       code: '000001',
       name: '上证指数',
       changePercent: 0.33,
+    });
+  });
+
+  it('规范美股代码并解析美元行情', () => {
+    const fields = Array(33).fill('');
+    fields[1] = '苹果';
+    fields[3] = '328.21';
+    fields[30] = '20260903160001';
+    fields[32] = '1.00';
+    const quotes = parseTencentStockQuoteResponse(
+      `v_usAAPL="${fields.join('~')}";`,
+      '2026-09-04T08:00:00.000Z',
+    );
+
+    expect(normalizeAssetCode(' brk-b ', 'us')).toBe('BRK.B');
+    expect(normalizeAssetCode('NASDAQ:AAPL', 'us')).toBe('AAPL');
+    expect(normalizeAssetHolding({ assetType: 'stock', code: 'aapl', market: 'us' })).toMatchObject({
+      code: 'AAPL',
+      market: 'us',
+      currency: 'USD',
+    });
+    expect(quotes[0]).toMatchObject({
+      assetType: 'stock',
+      code: 'AAPL',
+      name: '苹果',
+      price: 328.21,
+      changePercent: 1,
+      currency: 'USD',
+      source: 'tencent-us',
     });
   });
 

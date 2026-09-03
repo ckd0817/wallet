@@ -48,6 +48,19 @@ test('重试幂等、不同记录合并、最后提交覆盖、删除标记',asy
   assert.equal((await call(u,'GET','/sync/pull?cursor=0')).json().changes.find((c:any)=>c.id==='one').value,null);
   assert.equal((await push(u,[{...operation,changes:[tx('one',99)]}])).statusCode,409);
 });
+test('美股持仓和美元交易通过协议校验',async()=>{
+  const u=await account();
+  const holding={id:'us-h',assetType:'stock',code:'BRK.B',market:'us',currency:'USD',name:'伯克希尔',shares:2,costAmount:900,createdAt:'2026-09-04',updatedAt:'2026-09-04'};
+  const trade={id:'us-t',holdingId:'us-h',assetType:'stock',code:'BRK.B',name:'伯克希尔',currency:'USD',tradeType:'buy',source:'manual',status:'completed',shares:2,amount:900,price:450,occurredAt:'2026-09-04',createdAt:'2026-09-04'};
+  const response=await push(u,[op([
+    {kind:'assetHoldings',id:'us-h',value:holding},
+    {kind:'assetTradeRecords',id:'us-t',value:trade},
+  ],'seed')]);
+  assert.equal(response.statusCode,200,response.body);
+  const rows=(await call(u,'GET','/sync/pull?cursor=0')).json().changes;
+  assert.equal(rows.find((row:any)=>row.id==='us-h').value.currency,'USD');
+  assert.equal(rows.find((row:any)=>row.id==='us-t').value.code,'BRK.B');
+});
 test('周期重复执行和投资结算只记一次，独立买入累加',async()=>{
   const u=await account();
   const holding={id:'h',assetType:'fund',code:'000001',market:'fund',name:'基金',shares:10,costAmount:100,createdAt:'2026-09-04',updatedAt:'2026-09-04'};

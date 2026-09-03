@@ -60,7 +60,8 @@ export interface RecurringProfile {
 
 export type AssetType = 'stock' | 'fund';
 export type AssetQuoteType = AssetType | 'index';
-export type AssetMarket = 'sh' | 'sz' | 'fund';
+export type AssetMarket = 'sh' | 'sz' | 'fund' | 'us';
+export type AssetCurrency = 'CNY' | 'USD';
 export type AssetRecurringFrequency = 'daily' | 'weekly' | 'monthly';
 export type AssetTradeType = 'buy' | 'sell' | 'recurring';
 export type AssetTradeSource = 'manual' | 'recurring';
@@ -81,6 +82,7 @@ export interface AssetHolding {
   assetType: AssetType;
   code: string;
   market: AssetMarket;
+  currency?: AssetCurrency;
   name: string;
   shares: number;
   costAmount: number;
@@ -97,6 +99,7 @@ export interface AssetQuote {
   quoteTime: string;
   source: string;
   syncedAt: string;
+  currency?: AssetCurrency;
   priceSource?: AssetQuotePriceSource;
   estimatedPrice?: number;
   confirmedPrice?: number;
@@ -108,6 +111,7 @@ export interface AssetImportCandidate {
   assetType: AssetType;
   code: string;
   market: AssetMarket;
+  currency?: AssetCurrency;
   name: string;
   shares: number;
   costAmount: number;
@@ -150,6 +154,7 @@ export interface AssetTradeRecord {
   assetType: AssetType;
   code: string;
   name: string;
+  currency?: AssetCurrency;
   tradeType: AssetTradeType;
   source: AssetTradeSource;
   status?: AssetTradeStatus;

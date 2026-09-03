@@ -273,6 +273,7 @@ const normalizeAssetTradeRecords = (assetTradeRecords?: AssetTradeRecord[] | nul
             assetType: record.assetType === 'stock' ? 'stock' : 'fund',
             code: typeof record.code === 'string' ? record.code : '',
             name: typeof record.name === 'string' ? record.name : '',
+            currency: record.currency === 'USD' || /[A-Za-z]/.test(record.code ?? '') ? 'USD' : 'CNY',
             tradeType:
               record.tradeType === 'sell' || record.tradeType === 'recurring' || record.tradeType === 'buy'
                 ? record.tradeType
@@ -489,7 +490,7 @@ export const syncWebAssetQuotes = async (
   const funds = assetHoldings.filter((holding) => holding.assetType === 'fund');
 
   if (stocks.length > 0 || assetHoldings.length > 0) {
-    const stockTargets = stocks.map((holding) => `${holding.market}${holding.code}`);
+    const stockTargets = stocks.map((holding) => holding.market === 'us' ? `us${holding.code}` : `${holding.market}${holding.code}`);
     const query = [...stockTargets, 'sh000001'].join(',');
     const response = await fetch(`https://qt.gtimg.cn/q=${encodeURIComponent(query)}`);
     quotes.push(...parseTencentStockQuoteResponse(await response.text(), syncedAt));

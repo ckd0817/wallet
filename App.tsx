@@ -70,6 +70,7 @@ import {
   applyAssetRecurringPurchaseWithQuote,
   buildAssetPerformanceSnapshot,
   buildAssetPositions,
+  getAssetCurrency,
   getAssetQuoteConfirmedDate,
   isDelayedSettlementFund,
   isLikelyMarketOpenForHolding,
@@ -462,6 +463,7 @@ const App: React.FC = () => {
               assetType: currentHolding.assetType,
               code: currentHolding.code,
               name: quote?.name || currentHolding.name,
+              currency: getAssetCurrency(currentHolding),
               tradeType: 'recurring',
               source: 'recurring',
               status: 'completed',
@@ -482,6 +484,7 @@ const App: React.FC = () => {
               assetType: currentHolding.assetType,
               code: currentHolding.code,
               name: quote?.name || currentHolding.name,
+              currency: getAssetCurrency(currentHolding),
               tradeType: 'recurring',
               source: 'recurring',
               status: 'pending',
@@ -510,6 +513,7 @@ const App: React.FC = () => {
           assetType: currentHolding.assetType,
           code: currentHolding.code,
           name: quote.name || currentHolding.name,
+          currency: getAssetCurrency(currentHolding),
           tradeType: 'recurring',
           source: 'recurring',
           status: 'completed',
@@ -1004,7 +1008,8 @@ const App: React.FC = () => {
         const updatedQuoteCache = Array.from(quoteMap.values());
         const benchmarkQuote = updatedQuoteCache.find((quote) => quote.assetType === 'index' && quote.code === '000001');
         const nextPerformanceSnapshot = buildAssetPerformanceSnapshot(
-          buildAssetPositions(assetHoldingsWithNames, updatedQuoteCache),
+          buildAssetPositions(assetHoldingsWithNames, updatedQuoteCache)
+            .filter((position) => getAssetCurrency(position.holding) === 'CNY'),
           benchmarkQuote,
         );
         const nextSnapshot = normalizeSnapshot({

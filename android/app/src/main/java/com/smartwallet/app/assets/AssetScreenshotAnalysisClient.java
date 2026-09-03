@@ -16,15 +16,15 @@ public class AssetScreenshotAnalysisClient {
 
     private static final String PROMPT =
         "你正在分析一张股票或基金持仓截图。\n" +
-        "只识别 A 股股票、场内 ETF、场外公募基金。\n" +
+        "识别 A 股、美股、场内 ETF 和场外公募基金。\n" +
         "请提取每个持仓的代码、名称、类型、份额、总成本、单位成本、市值、持仓收益和收益率。\n" +
-        "股票 assetType=stock，基金 assetType=fund。股票 market 根据代码推断，6 或 5 开头为 sh，其余为 sz；基金 market=fund。\n" +
+        "股票 assetType=stock，基金 assetType=fund。美股代码保留大写字母和点，market=us，currency=USD；A 股 market=sh 或 sz，基金 market=fund，currency=CNY。\n" +
         "持仓金额、基金资产、总金额是市值 marketValue。\n" +
         "平均成本、单位成本是 unitCost。小数形态的“持仓成本”通常也是 unitCost，禁止直接当总成本。\n" +
         "金额形态且明确表示投入本金/持仓总成本的“持仓成本”才是 totalCost。\n" +
         "持仓收益、累计收益是 holdingProfit；持仓收益率是 profitRate。\n" +
         "如果缺少某个字段，将对应数值设为 0。\n" +
-        "只返回 JSON，不要输出 Markdown、解释或额外文本。返回格式固定为 {\"holdings\":[{\"assetType\":\"stock|fund\",\"code\":\"000001\",\"market\":\"sh|sz|fund\",\"name\":\"...\",\"shares\":number,\"totalCost\":number,\"unitCost\":number,\"marketValue\":number,\"holdingProfit\":number,\"profitRate\":number}]}。";
+        "只返回 JSON，不要输出 Markdown、解释或额外文本。返回格式固定为 {\"holdings\":[{\"assetType\":\"stock|fund\",\"code\":\"000001|AAPL\",\"market\":\"sh|sz|fund|us\",\"currency\":\"CNY|USD\",\"name\":\"...\",\"shares\":number,\"totalCost\":number,\"unitCost\":number,\"marketValue\":number,\"holdingProfit\":number,\"profitRate\":number}]}。";
 
     public JSONObject analyze(String imageBase64, JSONObject llmConfig) {
         JSONObject result = defaultResult();
@@ -137,14 +137,17 @@ public class AssetScreenshotAnalysisClient {
                 continue;
             }
             String assetType = "fund".equals(raw.optString("assetType", "")) ? "fund" : "stock";
-            String code = normalizeCode(raw.optString("code", ""));
+            String rawCode = raw.optString("code", "");
+            String market = normalizeMarket(assetType, rawCode, raw.optString("market", ""));
+            String code = normalizeCode(rawCode, market);
             if (code.isEmpty()) {
                 continue;
             }
             JSONObject holding = new JSONObject();
             safePut(holding, "assetType", assetType);
             safePut(holding, "code", code);
-            safePut(holding, "market", normalizeMarket(assetType, code, raw.optString("market", "")));
+            safePut(holding, "market", market);
+            safePut(holding, "currency", "us".equals(market) ? "USD" : "CNY");
             safePut(holding, "name", raw.optString("name", ""));
             double shares = normalizeAmount(raw.optDouble("shares", 0d));
             double totalCost = normalizeAmount(raw.optDouble("totalCost", 0d));
@@ -240,7 +243,14 @@ public class AssetScreenshotAnalysisClient {
         return raw;
     }
 
-    private String normalizeCode(String code) {
+    private String normalizeCode(String code, String market) {
+        if ("us".equals(market)) {
+            String normalized = code == null ? "" : code.trim().toUpperCase(java.util.Locale.US);
+            normalized = normalized.replaceFirst("^(NASDAQ|NYSE|AMEX|US)\\s*:", "");
+            normalized = normalized.replace('-', '.').replace('/', '.').replaceAll("[^A-Z0-9.]", "");
+            normalized = normalized.replaceAll("\\.{2,}", ".").replaceAll("^\\.+|\\.+$", "");
+            return normalized.length() > 12 ? normalized.substring(0, 12) : normalized;
+        }
         String normalized = code == null ? "" : code.replaceAll("\\D", "");
         return normalized.length() > 6 ? normalized.substring(0, 6) : normalized;
     }
@@ -248,6 +258,9 @@ public class AssetScreenshotAnalysisClient {
     private String normalizeMarket(String assetType, String code, String market) {
         if ("fund".equals(assetType)) {
             return "fund";
+        }
+        if ("us".equals(market) || (code != null && code.matches(".*[A-Za-z].*"))) {
+            return "us";
         }
         if ("sh".equals(market) || "sz".equals(market)) {
             return market;

@@ -1,6 +1,7 @@
 import {
   AssetHolding,
   AssetImportCandidate,
+  AssetCurrency,
   AssetMarket,
   AssetPerformanceSnapshot,
   AssetQuote,
@@ -45,7 +46,13 @@ export interface AssetRecurringExecution {
   priceSource?: AssetQuote['priceSource'];
 }
 
-export const normalizeAssetCode = (code: string) => code.trim().replace(/\D/g, '').slice(0, 6);
+export const normalizeAssetCode = (code: string, market?: AssetMarket) => {
+  const raw = code.trim().toUpperCase().replace(/^(NASDAQ|NYSE|AMEX|US)\s*:/, '');
+  if (market === 'us' || /[A-Z]/.test(raw)) {
+    return raw.replace(/[\-/]/g, '.').replace(/[^A-Z0-9.]/g, '').replace(/\.{2,}/g, '.').replace(/^\.+|\.+$/g, '').slice(0, 12);
+  }
+  return raw.replace(/\D/g, '').slice(0, 6);
+};
 
 const normalizeAmount = (value: unknown) =>
   typeof value === 'number' && Number.isFinite(value) ? Math.max(0, value) : 0;
@@ -53,13 +60,27 @@ const normalizeAmount = (value: unknown) =>
 const DISTRIBUTION_COLORS = ['#ef4444', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#06b6d4'];
 const DELAYED_SETTLEMENT_FUND_PATTERN = /qdii|纳斯达克|nasdaq/i;
 
-export const inferAssetMarket = (assetType: AssetType, code: string): AssetMarket => {
+export const inferAssetMarket = (assetType: AssetType, code: string, preferredMarket?: AssetMarket): AssetMarket => {
   if (assetType === 'fund') {
     return 'fund';
+  }
+  if (preferredMarket === 'us') {
+    return 'us';
+  }
+  if (preferredMarket === 'sh' || preferredMarket === 'sz') {
+    return preferredMarket;
+  }
+  if (/[A-Za-z]/.test(code)) {
+    return 'us';
   }
   const normalized = normalizeAssetCode(code);
   return normalized.startsWith('6') || normalized.startsWith('5') ? 'sh' : 'sz';
 };
+
+export const inferAssetCurrency = (market: AssetMarket): AssetCurrency => market === 'us' ? 'USD' : 'CNY';
+
+export const getAssetCurrency = (asset: { market?: AssetMarket; currency?: AssetCurrency; code?: string }): AssetCurrency =>
+  asset.currency === 'USD' || asset.market === 'us' || /[A-Za-z]/.test(asset.code ?? '') ? 'USD' : 'CNY';
 
 export const isDelayedSettlementFund = (holding: Pick<AssetHolding, 'assetType' | 'name'>) =>
   holding.assetType === 'fund' && DELAYED_SETTLEMENT_FUND_PATTERN.test(holding.name);
@@ -150,7 +171,8 @@ export const advanceAssetRecurringPlanPastDate = (plan: AssetRecurringPlan, date
 
 export const normalizeAssetHolding = (holding: Partial<AssetHolding>): AssetHolding | null => {
   const assetType = holding.assetType === 'fund' ? 'fund' : 'stock';
-  const code = normalizeAssetCode(holding.code ?? '');
+  const market = inferAssetMarket(assetType, holding.code ?? '', holding.market);
+  const code = normalizeAssetCode(holding.code ?? '', market);
   if (!code) {
     return null;
   }
@@ -160,9 +182,8 @@ export const normalizeAssetHolding = (holding: Partial<AssetHolding>): AssetHold
     id: typeof holding.id === 'string' && holding.id ? holding.id : `${assetType}-${code}-${Date.now()}`,
     assetType,
     code,
-    market: holding.market === 'sh' || holding.market === 'sz' || holding.market === 'fund'
-      ? holding.market
-      : inferAssetMarket(assetType, code),
+    market,
+    currency: inferAssetCurrency(market),
     name: typeof holding.name === 'string' ? holding.name.trim() : '',
     shares: typeof holding.shares === 'number' && Number.isFinite(holding.shares) ? Math.max(0, holding.shares) : 0,
     costAmount:
@@ -174,7 +195,8 @@ export const normalizeAssetHolding = (holding: Partial<AssetHolding>): AssetHold
 
 export const normalizeAssetQuote = (quote: Partial<AssetQuote>): AssetQuote | null => {
   const assetType = quote.assetType === 'fund' ? 'fund' : quote.assetType === 'index' ? 'index' : 'stock';
-  const code = normalizeAssetCode(quote.code ?? '');
+  const currency: AssetCurrency = quote.currency === 'USD' || /[A-Za-z]/.test(quote.code ?? '') ? 'USD' : 'CNY';
+  const code = normalizeAssetCode(quote.code ?? '', currency === 'USD' ? 'us' : undefined);
   if (!code) {
     return null;
   }
@@ -189,6 +211,7 @@ export const normalizeAssetQuote = (quote: Partial<AssetQuote>): AssetQuote | nu
     quoteTime: typeof quote.quoteTime === 'string' ? quote.quoteTime : '',
     source: typeof quote.source === 'string' && quote.source ? quote.source : 'unknown',
     syncedAt: typeof quote.syncedAt === 'string' && quote.syncedAt ? quote.syncedAt : new Date().toISOString(),
+    currency,
     priceSource: quote.priceSource === 'confirmed' ? 'confirmed' : quote.priceSource === 'estimated' ? 'estimated' : undefined,
     estimatedPrice:
       typeof quote.estimatedPrice === 'number' && Number.isFinite(quote.estimatedPrice)
@@ -466,11 +489,13 @@ export const parseTencentFundQuoteResponse = (
 
 export const parseTencentStockQuoteResponse = (content: string, syncedAt = new Date().toISOString()): AssetQuote[] => {
   const quotes: AssetQuote[] = [];
-  const pattern = /v_(sh|sz)(\d{6})="([^"]*)";/g;
+  const pattern = /v_(?:(sh|sz)(\d{6})|us([A-Z0-9.]+))="([^"]*)";/gi;
   let match: RegExpExecArray | null;
 
   while ((match = pattern.exec(content)) !== null) {
-    const [, market, code, rawFields] = match;
+    const market: AssetMarket = match[3] ? 'us' : match[1] as 'sh' | 'sz';
+    const code = normalizeAssetCode(match[3] || match[2], market);
+    const rawFields = match[4];
     const fields = rawFields.split('~');
     const name = fields[1] ?? '';
     const price = Number(fields[3] || 0);
@@ -480,15 +505,17 @@ export const parseTencentStockQuoteResponse = (content: string, syncedAt = new D
       continue;
     }
 
+    const isIndex = (market === 'sh' && code === '000001') || (market === 'us' && ['INX', 'IXIC', 'DJI'].includes(code));
     quotes.push({
-      assetType: market === 'sh' && code === '000001' ? 'index' : 'stock',
+      assetType: isIndex ? 'index' : 'stock',
       code,
       name,
       price,
       changePercent: Number.isFinite(changePercent) ? changePercent : 0,
       quoteTime: formatTencentQuoteTime(rawTime),
-      source: market === 'sh' && code === '000001' ? 'tencent-index-sh' : `tencent-${market}`,
+      source: isIndex ? `tencent-index-${market}` : `tencent-${market}`,
       syncedAt,
+      currency: market === 'us' ? 'USD' : 'CNY',
     });
   }
 
@@ -617,7 +644,8 @@ export const buildAssetHoldingDistribution = (positions: AssetPositionView[]): A
 
 export const normalizeAssetImportCandidate = (candidate: Partial<AssetImportCandidate>): AssetImportCandidate | null => {
   const assetType = candidate.assetType === 'fund' ? 'fund' : 'stock';
-  const code = normalizeAssetCode(candidate.code ?? '');
+  const market = inferAssetMarket(assetType, candidate.code ?? '', candidate.market);
+  const code = normalizeAssetCode(candidate.code ?? '', market);
   if (!code) {
     return null;
   }
@@ -644,9 +672,8 @@ export const normalizeAssetImportCandidate = (candidate: Partial<AssetImportCand
   return {
     assetType,
     code,
-    market: candidate.market === 'sh' || candidate.market === 'sz' || candidate.market === 'fund'
-      ? candidate.market
-      : inferAssetMarket(assetType, code),
+    market,
+    currency: inferAssetCurrency(market),
     name: typeof candidate.name === 'string' ? candidate.name.trim() : '',
     shares,
     costAmount,

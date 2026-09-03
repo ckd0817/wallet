@@ -16,6 +16,7 @@ import {
 
 import {
   AssetHolding,
+  AssetCurrency,
   AssetImportCandidate,
   AssetPerformanceSnapshot,
   AssetQuote,
@@ -32,6 +33,8 @@ import {
   buildAssetSummary,
   AssetCostSource,
   inferAssetMarket,
+  inferAssetCurrency,
+  getAssetCurrency,
   isDelayedSettlementFund,
   mergeAssetPerformanceHistory,
   normalizeAssetCode,
@@ -61,7 +64,7 @@ interface AnalysisProps {
 }
 
 type AssetFormState = {
-  assetType: AssetType;
+  assetKind: 'fund' | 'cn-stock' | 'us-stock';
   code: string;
   shares: string;
   costAmount: string;
@@ -71,7 +74,7 @@ type AssetFormState = {
 type AssetOperationType = 'buy' | 'sell';
 
 const emptyForm: AssetFormState = {
-  assetType: 'fund',
+  assetKind: 'fund',
   code: '',
   shares: '',
   costAmount: '',
@@ -132,10 +135,14 @@ const Analysis: React.FC<AnalysisProps> = ({
   const [recurringEnabled, setRecurringEnabled] = useState(false);
 
   const positions = useMemo(() => buildAssetPositions(assetHoldings, assetQuoteCache), [assetHoldings, assetQuoteCache]);
-  const summary = useMemo(() => buildAssetSummary(positions), [positions]);
+  const cnyPositions = useMemo(() => positions.filter((position) => getAssetCurrency(position.holding) === 'CNY'), [positions]);
+  const usdPositions = useMemo(() => positions.filter((position) => getAssetCurrency(position.holding) === 'USD'), [positions]);
+  const cnySummary = useMemo(() => buildAssetSummary(cnyPositions), [cnyPositions]);
+  const usdSummary = useMemo(() => buildAssetSummary(usdPositions), [usdPositions]);
+  const showCnySummary = cnyPositions.length > 0 || usdPositions.length === 0;
   const freedom = useMemo(
-    () => calculateWealthFreedom(summary.totalMarketValue, transactions, expenseAverageMonths),
-    [summary.totalMarketValue, transactions, expenseAverageMonths],
+    () => calculateWealthFreedom(cnySummary.totalMarketValue, transactions, expenseAverageMonths),
+    [cnySummary.totalMarketValue, transactions, expenseAverageMonths],
   );
   const freedomPeriodLabel = expenseAverageMonths === 12 ? '近1年' : `近${expenseAverageMonths}个月`;
   const displayPerformanceHistory = useMemo(
@@ -143,13 +150,14 @@ const Analysis: React.FC<AnalysisProps> = ({
       mergeAssetPerformanceHistory(
         assetPerformanceHistory,
         buildAssetPerformanceSnapshot(
-          positions,
+          cnyPositions,
           assetQuoteCache.find((quote) => quote.assetType === 'index' && quote.code === '000001'),
         ),
       ),
-    [assetPerformanceHistory, assetQuoteCache, positions],
+    [assetPerformanceHistory, assetQuoteCache, cnyPositions],
   );
-  const distribution = useMemo(() => buildAssetHoldingDistribution(positions), [positions]);
+  const distribution = useMemo(() => buildAssetHoldingDistribution(cnyPositions), [cnyPositions]);
+  const usdDistribution = useMemo(() => buildAssetHoldingDistribution(usdPositions), [usdPositions]);
   const editingHolding = useMemo(
     () => assetHoldings.find((holding) => holding.id === editingId) ?? null,
     [assetHoldings, editingId],
@@ -175,7 +183,7 @@ const Analysis: React.FC<AnalysisProps> = ({
     const existingPlan = assetRecurringPlans.find((plan) => plan.holdingId === holding.id);
     setEditingId(holding.id);
     setForm({
-      assetType: holding.assetType,
+      assetKind: holding.assetType === 'fund' ? 'fund' : holding.market === 'us' ? 'us-stock' : 'cn-stock',
       code: holding.code,
       shares: String(holding.shares),
       costAmount: String(holding.costAmount),
@@ -201,8 +209,17 @@ const Analysis: React.FC<AnalysisProps> = ({
   };
 
   const buildPayload = () => {
-    const assetType = form.assetType;
-    const code = normalizeAssetCode(form.code);
+    const assetType: AssetType = form.assetKind === 'fund' ? 'fund' : 'stock';
+    const domesticCode = normalizeAssetCode(form.code);
+    const preferredMarket = form.assetKind === 'us-stock'
+      ? 'us'
+      : form.assetKind === 'fund'
+        ? 'fund'
+        : domesticCode.startsWith('6') || domesticCode.startsWith('5')
+          ? 'sh'
+          : 'sz';
+    const market = inferAssetMarket(assetType, form.code, preferredMarket);
+    const code = normalizeAssetCode(form.code, market);
     const shares = Number(form.shares || 0);
     const totalCost = readOptionalAmount(form.costAmount);
     const averageCost = readOptionalAmount(form.averageCost);
@@ -210,7 +227,8 @@ const Analysis: React.FC<AnalysisProps> = ({
     return {
       assetType,
       code,
-      market: inferAssetMarket(assetType, code),
+      market,
+      currency: inferAssetCurrency(market),
       name: editingHolding?.assetType === assetType && editingHolding.code === code ? editingHolding.name : '',
       shares,
       costAmount,
@@ -264,6 +282,7 @@ const Analysis: React.FC<AnalysisProps> = ({
       assetType: editingHolding.assetType,
       code: editingHolding.code,
       market: editingHolding.market,
+      currency: getAssetCurrency(editingHolding),
       name: editingHolding.name,
       shares: editingHolding.shares,
       costAmount: editingHolding.costAmount,
@@ -275,6 +294,7 @@ const Analysis: React.FC<AnalysisProps> = ({
         assetType: editingHolding.assetType,
         code: editingHolding.code,
         name: currentQuote?.name || editingHolding.name,
+        currency: getAssetCurrency(editingHolding),
         tradeType: operationType,
         source: 'manual',
         status: 'pending',
@@ -318,6 +338,7 @@ const Analysis: React.FC<AnalysisProps> = ({
     const completedPayload = {
       ...nextPayload,
       name: currentQuote?.name || editingHolding.name,
+      currency: getAssetCurrency(editingHolding),
       shares: nextShares,
       costAmount: nextCostAmount,
     };
@@ -327,6 +348,7 @@ const Analysis: React.FC<AnalysisProps> = ({
       assetType: editingHolding.assetType,
       code: editingHolding.code,
       name: currentQuote?.name || editingHolding.name,
+      currency: getAssetCurrency(editingHolding),
       tradeType: operationType,
       source: 'manual',
       status: 'completed',
@@ -397,6 +419,7 @@ const Analysis: React.FC<AnalysisProps> = ({
       assetType: candidate.assetType,
       code: candidate.code,
       market: candidate.market,
+      currency: getAssetCurrency(candidate),
       name: candidate.name,
       shares: candidate.shares,
       costAmount: candidate.costAmount,
@@ -407,23 +430,19 @@ const Analysis: React.FC<AnalysisProps> = ({
   return (
     <div className="flex flex-col h-full animate-slide-up pb-24 space-y-6">
       <div className="grid grid-cols-2 gap-4">
-        <SummaryCard label="总资产" value={`¥${summary.totalMarketValue.toFixed(2)}`} />
-        <SummaryCard
-          label="持有收益"
-          value={`¥${summary.totalProfit.toFixed(2)}`}
-          tone={summary.totalProfit >= 0 ? 'positive' : 'negative'}
-          subValue={`${summary.totalProfitRate.toFixed(1)}%`}
-        />
-        <SummaryCard
-          label="今日涨跌"
-          value={`¥${summary.dailyChangeAmount.toFixed(2)}`}
-          tone={summary.dailyChangeAmount >= 0 ? 'positive' : 'negative'}
-        />
-        <SummaryCard
+        {showCnySummary && <>
+          <SummaryCard label="人民币资产" value={formatAssetMoney(cnySummary.totalMarketValue, 'CNY')} />
+          <SummaryCard label="人民币收益" value={formatAssetMoney(cnySummary.totalProfit, 'CNY')} tone={cnySummary.totalProfit >= 0 ? 'positive' : 'negative'} subValue={`今日 ${formatSignedAssetMoney(cnySummary.dailyChangeAmount, 'CNY')} · ${cnySummary.totalProfitRate.toFixed(1)}%`} />
+        </>}
+        {usdPositions.length > 0 && <>
+          <SummaryCard label="美元资产" value={formatAssetMoney(usdSummary.totalMarketValue, 'USD')} />
+          <SummaryCard label="美元收益" value={formatAssetMoney(usdSummary.totalProfit, 'USD')} tone={usdSummary.totalProfit >= 0 ? 'positive' : 'negative'} subValue={`今日 ${formatSignedAssetMoney(usdSummary.dailyChangeAmount, 'USD')} · ${usdSummary.totalProfitRate.toFixed(1)}%`} />
+        </>}
+        {cnyPositions.length > 0 && <SummaryCard
           label="不用上班天数"
           value={freedom.days === null ? '暂无' : formatFreedomDays(freedom.days)}
           subValue={freedom.days === null ? `${freedomPeriodLabel}无支出` : `${freedomPeriodLabel} · 日均 ¥${freedom.avgDailyExpense.toFixed(2)}`}
-        />
+        />}
       </div>
 
       <div className="grid grid-cols-4 gap-2">
@@ -448,13 +467,13 @@ const Analysis: React.FC<AnalysisProps> = ({
               <div className="min-w-0">
                 <p className="text-sm font-medium text-primary truncate">{candidate.name || candidate.code}</p>
                 <p className="text-xs text-secondary">
-                  {candidate.assetType === 'fund' ? '基金' : '股票'} · {candidate.code}
+                  {formatAssetKind(candidate)} · {candidate.code}
                   {' · '}
                   {candidate.shares.toFixed(2)}份
                 </p>
                 <p className={`text-xs mt-1 ${candidate.costAmount > 0 ? 'text-secondary' : 'text-warning'}`}>
                   {candidate.costAmount > 0
-                    ? `总成本 ¥${candidate.costAmount.toFixed(2)} · ${formatCostSource(candidate.costSource)}`
+                    ? `总成本 ${formatAssetMoney(candidate.costAmount, getAssetCurrency(candidate))} · ${formatCostSource(candidate.costSource)}`
                     : '成本待补'}
                 </p>
               </div>
@@ -487,11 +506,11 @@ const Analysis: React.FC<AnalysisProps> = ({
                     {position.quote?.name || position.holding.name || position.holding.code}
                   </p>
                   <p className="text-xs text-secondary mt-1">
-                    {position.holding.assetType === 'fund' ? '基金' : '股票'} · {position.holding.code}
+                    {formatAssetKind(position.holding)} · {position.holding.code}
                   </p>
                 </div>
                 <div className="text-right">
-                  <p className="text-base font-semibold text-primary">¥{position.marketValue.toFixed(2)}</p>
+                  <p className="text-base font-semibold text-primary">{formatAssetMoney(position.marketValue, getAssetCurrency(position.holding))}</p>
                   <p className={`text-xs ${position.profit >= 0 ? 'text-danger' : 'text-success'}`}>
                     {position.profit >= 0 ? '+' : ''}{position.profit.toFixed(2)} / {position.profitRate.toFixed(1)}%
                   </p>
@@ -499,7 +518,7 @@ const Analysis: React.FC<AnalysisProps> = ({
               </div>
               <div className="grid grid-cols-3 gap-3 text-xs">
                 <Meta label="份额" value={position.holding.shares.toFixed(2)} />
-                <Meta label="总成本" value={`¥${position.holding.costAmount.toFixed(2)}`} />
+                <Meta label="总成本" value={formatAssetMoney(position.holding.costAmount, getAssetCurrency(position.holding))} />
                 <Meta
                   label="涨跌幅"
                   value={position.quote ? `${position.quote.changePercent >= 0 ? '+' : ''}${position.quote.changePercent.toFixed(2)}%` : '暂无'}
@@ -516,6 +535,8 @@ const Analysis: React.FC<AnalysisProps> = ({
         <ProfitAnalytics
           history={displayPerformanceHistory}
           distribution={distribution}
+          usdDistribution={usdDistribution}
+          showCnyHistory={cnyPositions.length > 0 || assetPerformanceHistory.length > 0}
         />
       )}
 
@@ -544,21 +565,25 @@ const Analysis: React.FC<AnalysisProps> = ({
 
             <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
               <div className="flex bg-surface p-1 rounded-xl border border-border">
-                {(['fund', 'stock'] as AssetType[]).map((assetType) => (
+                {([
+                  { value: 'fund', label: '基金' },
+                  { value: 'cn-stock', label: 'A股' },
+                  { value: 'us-stock', label: '美股' },
+                ] as {value: AssetFormState['assetKind'];label:string}[]).map((item) => (
                   <button
-                    key={assetType}
+                    key={item.value}
                     type="button"
-                    onClick={() => setForm((previous) => ({ ...previous, assetType }))}
+                    onClick={() => setForm((previous) => ({ ...previous, assetKind: item.value, code: '' }))}
                     className={`flex-1 py-2 rounded-lg text-sm font-semibold ${
-                      form.assetType === assetType ? 'bg-primary text-white' : 'text-secondary'
+                      form.assetKind === item.value ? 'bg-primary text-white' : 'text-secondary'
                     }`}
                   >
-                    {assetType === 'fund' ? '基金' : '股票'}
+                    {item.label}
                   </button>
                 ))}
               </div>
 
-              <Field label="代码" value={form.code} onChange={(value) => setForm((previous) => ({ ...previous, code: value }))} inputMode="numeric" />
+              <Field label="代码" value={form.code} onChange={(value) => setForm((previous) => ({ ...previous, code: value }))} inputMode={form.assetKind === 'us-stock' ? 'text' : 'numeric'} />
               <Field label="份额" value={form.shares} onChange={(value) => setForm((previous) => ({ ...previous, shares: value }))} inputMode="decimal" />
               <div className="space-y-3">
                 <div className="flex items-center justify-between gap-3">
@@ -566,8 +591,8 @@ const Analysis: React.FC<AnalysisProps> = ({
                   <span className="text-xs text-zinc-400">总成本优先</span>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
-                  <Field label="总成本" value={form.costAmount} onChange={(value) => setForm((previous) => ({ ...previous, costAmount: value }))} inputMode="decimal" />
-                  <Field label="平均成本" value={form.averageCost} onChange={(value) => setForm((previous) => ({ ...previous, averageCost: value }))} inputMode="decimal" />
+                  <Field label={`总成本（${form.assetKind === 'us-stock' ? '美元' : '人民币'}）`} value={form.costAmount} onChange={(value) => setForm((previous) => ({ ...previous, costAmount: value }))} inputMode="decimal" />
+                  <Field label={`平均成本（${form.assetKind === 'us-stock' ? '美元' : '人民币'}）`} value={form.averageCost} onChange={(value) => setForm((previous) => ({ ...previous, averageCost: value }))} inputMode="decimal" />
                 </div>
               </div>
 
@@ -591,7 +616,7 @@ const Analysis: React.FC<AnalysisProps> = ({
                     ))}
                   </div>
                   <Field
-                    label={operationType === 'sell' ? '减仓金额' : '加仓金额'}
+                    label={`${operationType === 'sell' ? '减仓金额' : '加仓金额'}（${getAssetCurrency(editingHolding) === 'USD' ? '美元' : '人民币'}）`}
                     value={operationAmount}
                     onChange={setOperationAmount}
                     inputMode="decimal"
@@ -774,20 +799,20 @@ const TradeRecordsPanel = ({ records, onClose }: { records: AssetTradeRecord[]; 
                     <div className="flex items-center gap-2">
                       <span className={`text-xs font-semibold ${tradeTone(record.tradeType)}`}>{formatTradeType(record.tradeType)}</span>
                       {record.status === 'pending' && <span className="text-xs font-semibold text-warning">待成交</span>}
-                      <span className="text-xs text-secondary">{record.assetType === 'fund' ? '基金' : '股票'} · {record.code}</span>
+                      <span className="text-xs text-secondary">{formatAssetKind(record)} · {record.code}</span>
                     </div>
                     <p className="text-sm font-semibold text-primary truncate mt-1">{record.name || record.code}</p>
                     <p className="text-xs text-zinc-400 mt-1">{formatDateTime(record.occurredAt)}</p>
                   </div>
                   <div className="text-right flex-shrink-0">
-                    <p className="text-sm font-semibold text-primary">¥{record.amount.toFixed(2)}</p>
+                    <p className="text-sm font-semibold text-primary">{formatAssetMoney(record.amount, getAssetCurrency(record))}</p>
                     <p className="text-xs text-secondary mt-1">
                       {record.status === 'pending' ? '份额待确认' : `${record.shares.toFixed(4)}份`}
                     </p>
                   </div>
                 </div>
                 <div className="grid grid-cols-3 gap-3 mt-4 text-xs">
-                  <Meta label="成交价" value={record.status === 'pending' ? '待确认' : `¥${record.price.toFixed(4)}`} />
+                  <Meta label="成交价" value={record.status === 'pending' ? '待确认' : formatAssetMoney(record.price, getAssetCurrency(record), 4)} />
                   <Meta label="来源" value={record.source === 'recurring' ? '定投' : '手动'} />
                   <Meta label="状态" value={record.status === 'pending' ? '待成交' : '已成交'} />
                 </div>
@@ -1094,9 +1119,13 @@ type AssetCalendarMode = 'day' | 'month' | 'year';
 const ProfitAnalytics = ({
   history,
   distribution,
+  usdDistribution,
+  showCnyHistory,
 }: {
   history: AssetPerformanceSnapshot[];
   distribution: ReturnType<typeof buildAssetHoldingDistribution>;
+  usdDistribution: ReturnType<typeof buildAssetHoldingDistribution>;
+  showCnyHistory: boolean;
 }) => {
   const [trendRange, setTrendRange] = useState<AssetTrendRange>('week');
   const [calendarMode, setCalendarMode] = useState<AssetCalendarMode>('day');
@@ -1111,7 +1140,6 @@ const ProfitAnalytics = ({
     ...item,
     label: `${Number(item.date.slice(5, 7))}/${Number(item.date.slice(8, 10))}`,
   }));
-  const pieData = distribution.map((item) => ({ ...item })) as Array<Record<string, string | number>>;
   const calendarMonth = latest?.date.slice(0, 7) ?? new Date().toISOString().slice(0, 7);
   const calendarDays = buildCalendarDays(calendarMonth, history);
   const calendarMonths = buildCalendarMonths(calendarMonth.slice(0, 4), history);
@@ -1124,10 +1152,11 @@ const ProfitAnalytics = ({
 
   return (
     <div className="space-y-4">
+      {showCnyHistory && <>
       <section className="bg-white border border-border p-5 rounded-2xl">
         <div className="flex items-start justify-between gap-3 mb-4">
           <div>
-            <h3 className="text-base font-semibold text-primary">收益走势</h3>
+            <h3 className="text-base font-semibold text-primary">{usdDistribution.length > 0 ? '人民币收益走势' : '收益走势'}</h3>
             {filteredTrendHistory.length > 0 && (
               <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs mt-2">
                 <span className={profitTone(rangeProfit)}>区间收益 {formatSignedCurrency(rangeProfit)}</span>
@@ -1195,7 +1224,7 @@ const ProfitAnalytics = ({
       <section className="bg-white border border-border p-5 rounded-2xl">
         <div className="flex items-start justify-between gap-3 mb-4">
           <div>
-            <h3 className="text-base font-semibold text-primary">盈亏日历</h3>
+            <h3 className="text-base font-semibold text-primary">{usdDistribution.length > 0 ? '人民币盈亏日历' : '盈亏日历'}</h3>
             <p className={`text-sm mt-1 ${profitTone(monthProfit)}`}>{formatSignedCurrency(monthProfit)}</p>
           </div>
           <span className="text-xs text-secondary">{calendarMonth.replace('-', '年')}月</span>
@@ -1244,41 +1273,54 @@ const ProfitAnalytics = ({
           </div>
         )}
       </section>
+      </>}
 
-      <section className="bg-white border border-border p-5 rounded-2xl">
-        <h3 className="text-base font-semibold text-primary mb-4">持仓分布</h3>
-        {distribution.length > 0 ? (
-          <div className="grid grid-cols-[7rem,1fr] gap-4 items-center">
-            <div className="relative h-28">
-              <ResponsiveContainer width="100%" height="100%">
-                <RechartsPieChart>
-                  <Pie data={pieData} dataKey="value" innerRadius={34} outerRadius={52} paddingAngle={2}>
-                    {distribution.map((item) => (
-                      <Cell key={item.id} fill={item.color} />
-                    ))}
-                  </Pie>
-                </RechartsPieChart>
-              </ResponsiveContainer>
-              <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                <span className="text-lg font-semibold text-primary">{distribution.length}</span>
-                <span className="text-xs text-secondary">持仓</span>
-              </div>
-            </div>
-            <div className="space-y-3 min-w-0">
-              {distribution.slice(0, 5).map((item) => (
-                <div key={item.id} className="grid grid-cols-[0.5rem,1fr,auto] gap-2 items-center text-xs">
-                  <span className="w-2 h-2 rounded-full" style={{ backgroundColor: item.color }} />
-                  <span className="truncate text-primary">{item.name}</span>
-                  <span className="text-secondary">{item.percent.toFixed(1)}%</span>
-                </div>
-              ))}
+      {(distribution.length > 0 || usdDistribution.length === 0) && <HoldingDistribution
+        title={usdDistribution.length > 0 ? '人民币持仓分布' : '持仓分布'}
+        distribution={distribution}
+      />}
+      {usdDistribution.length > 0 && <HoldingDistribution title="美元持仓分布" distribution={usdDistribution} />}
+    </div>
+  );
+};
+
+const HoldingDistribution = ({ title, distribution }: {
+  title: string;
+  distribution: ReturnType<typeof buildAssetHoldingDistribution>;
+}) => {
+  const pieData = distribution.map((item) => ({ ...item })) as Array<Record<string, string | number>>;
+  return (
+    <section className="bg-white border border-border p-5 rounded-2xl">
+      <h3 className="text-base font-semibold text-primary mb-4">{title}</h3>
+      {distribution.length > 0 ? (
+        <div className="grid grid-cols-[7rem,1fr] gap-4 items-center">
+          <div className="relative h-28">
+            <ResponsiveContainer width="100%" height="100%">
+              <RechartsPieChart>
+                <Pie data={pieData} dataKey="value" innerRadius={34} outerRadius={52} paddingAngle={2}>
+                  {distribution.map((item) => <Cell key={item.id} fill={item.color} />)}
+                </Pie>
+              </RechartsPieChart>
+            </ResponsiveContainer>
+            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+              <span className="text-lg font-semibold text-primary">{distribution.length}</span>
+              <span className="text-xs text-secondary">持仓</span>
             </div>
           </div>
-        ) : (
-          <EmptyPanel label="暂无分布" />
-        )}
-      </section>
-    </div>
+          <div className="space-y-3 min-w-0">
+            {distribution.slice(0, 5).map((item) => (
+              <div key={item.id} className="grid grid-cols-[0.5rem,1fr,auto] gap-2 items-center text-xs">
+                <span className="w-2 h-2 rounded-full" style={{ backgroundColor: item.color }} />
+                <span className="truncate text-primary">{item.name}</span>
+                <span className="text-secondary">{item.percent.toFixed(1)}%</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <EmptyPanel label="暂无分布" />
+      )}
+    </section>
   );
 };
 
@@ -1374,6 +1416,19 @@ const formatDateTime = (value: string) => {
 };
 
 const profitTone = (value: number) => (value >= 0 ? 'text-danger' : 'text-success');
+
+const formatAssetMoney = (value: number, currency: AssetCurrency, digits = 2) =>
+  `${currency === 'USD' ? '$' : '¥'}${value.toFixed(digits)}`;
+
+const formatSignedAssetMoney = (value: number, currency: AssetCurrency, digits = 2) =>
+  `${value >= 0 ? '+' : '-'}${currency === 'USD' ? '$' : '¥'}${Math.abs(value).toFixed(digits)}`;
+
+const formatAssetKind = (asset: { assetType: AssetType; market?: AssetHolding['market']; code: string }) => {
+  if (asset.assetType === 'fund') {
+    return '基金';
+  }
+  return asset.market === 'us' || /[A-Za-z]/.test(asset.code) ? '美股' : 'A股';
+};
 
 const formatSignedCurrency = (value: number) => `${value >= 0 ? '+' : '-'}¥${Math.abs(value).toFixed(2)}`;
 

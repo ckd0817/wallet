@@ -27,6 +27,7 @@ public class AssetQuoteClient {
     private static final Pattern FUND_PATTERN = Pattern.compile("jsonpgz\\((.*)\\);?");
     private static final Pattern TENCENT_FUND_PATTERN = Pattern.compile("v_jj(\\d{6})=\"([^\"]*)\";");
     private static final Pattern STOCK_PATTERN = Pattern.compile("v_(sh|sz)(\\d{6})=\"([^\"]*)\";");
+    private static final Pattern US_STOCK_PATTERN = Pattern.compile("v_us([A-Z0-9.]+)=\"([^\"]*)\";", Pattern.CASE_INSENSITIVE);
 
     public JSONArray sync(JSONArray holdings) {
         return sync(holdings, SOURCE_EASTMONEY);
@@ -45,7 +46,10 @@ public class AssetQuoteClient {
                 continue;
             }
             String assetType = holding.optString("assetType", "");
-            String code = normalizeCode(holding.optString("code", ""));
+            String rawCode = holding.optString("code", "");
+            String market = holding.optString("market", "");
+            boolean isUs = "us".equals(market) || rawCode.matches(".*[A-Za-z].*");
+            String code = isUs ? normalizeUsCode(rawCode) : normalizeCode(rawCode);
             if (code.isEmpty()) {
                 continue;
             }
@@ -59,8 +63,12 @@ public class AssetQuoteClient {
                 if (stockQuery.length() > 0) {
                     stockQuery.append(",");
                 }
-                String market = holding.optString("market", inferStockMarket(code));
-                stockQuery.append(("sh".equals(market) ? "sh" : "sz")).append(code);
+                if (isUs) {
+                    stockQuery.append("us").append(code);
+                } else {
+                    market = market.isEmpty() ? inferStockMarket(code) : market;
+                    stockQuery.append(("sh".equals(market) ? "sh" : "sz")).append(code);
+                }
             }
         }
 
@@ -210,30 +218,37 @@ public class AssetQuoteClient {
         JSONArray quotes = new JSONArray();
         Matcher matcher = STOCK_PATTERN.matcher(content == null ? "" : content);
         while (matcher.find()) {
-            String market = matcher.group(1);
-            String code = matcher.group(2);
-            String[] fields = matcher.group(3).split("~", -1);
-            if (fields.length < 33) {
-                continue;
-            }
-            double price = parseDouble(fields[3]);
-            if (price <= 0) {
-                continue;
-            }
-
-            JSONObject quote = new JSONObject();
-            boolean isIndex = "sh".equals(market) && "000001".equals(code);
-            safePut(quote, "assetType", isIndex ? "index" : "stock");
-            safePut(quote, "code", code);
-            safePut(quote, "name", fields[1]);
-            safePut(quote, "price", price);
-            safePut(quote, "changePercent", parseDouble(fields[32]));
-            safePut(quote, "quoteTime", formatTencentTime(fields[30]));
-            safePut(quote, "source", isIndex ? "tencent-index-sh" : "tencent-" + market);
-            safePut(quote, "syncedAt", syncedAt);
-            quotes.put(quote);
+            appendStockQuote(quotes, matcher.group(1), matcher.group(2), matcher.group(3), syncedAt);
+        }
+        Matcher usMatcher = US_STOCK_PATTERN.matcher(content == null ? "" : content);
+        while (usMatcher.find()) {
+            appendStockQuote(quotes, "us", normalizeUsCode(usMatcher.group(1)), usMatcher.group(2), syncedAt);
         }
         return quotes;
+    }
+
+    private void appendStockQuote(JSONArray quotes, String market, String code, String rawFields, String syncedAt) {
+        String[] fields = rawFields.split("~", -1);
+        if (fields.length < 33) {
+            return;
+        }
+        double price = parseDouble(fields[3]);
+        if (price <= 0) {
+            return;
+        }
+        JSONObject quote = new JSONObject();
+        boolean isIndex = ("sh".equals(market) && "000001".equals(code)) ||
+            ("us".equals(market) && ("INX".equals(code) || "IXIC".equals(code) || "DJI".equals(code)));
+        safePut(quote, "assetType", isIndex ? "index" : "stock");
+        safePut(quote, "code", code);
+        safePut(quote, "name", fields[1]);
+        safePut(quote, "price", price);
+        safePut(quote, "changePercent", parseDouble(fields[32]));
+        safePut(quote, "quoteTime", formatTencentTime(fields[30]));
+        safePut(quote, "source", isIndex ? "tencent-index-" + market : "tencent-" + market);
+        safePut(quote, "syncedAt", syncedAt);
+        safePut(quote, "currency", "us".equals(market) ? "USD" : "CNY");
+        quotes.put(quote);
     }
 
     private JSONObject fetchFundQuote(String code, String name, String source) {
@@ -373,6 +388,14 @@ public class AssetQuoteClient {
     private String normalizeCode(String code) {
         String normalized = code == null ? "" : code.replaceAll("\\D", "");
         return normalized.length() > 6 ? normalized.substring(0, 6) : normalized;
+    }
+
+    private String normalizeUsCode(String code) {
+        String normalized = code == null ? "" : code.trim().toUpperCase(Locale.US);
+        normalized = normalized.replaceFirst("^(NASDAQ|NYSE|AMEX|US)\\s*:", "");
+        normalized = normalized.replace('-', '.').replace('/', '.').replaceAll("[^A-Z0-9.]", "");
+        normalized = normalized.replaceAll("\\.{2,}", ".").replaceAll("^\\.+|\\.+$", "");
+        return normalized.length() > 12 ? normalized.substring(0, 12) : normalized;
     }
 
     private String inferStockMarket(String code) {

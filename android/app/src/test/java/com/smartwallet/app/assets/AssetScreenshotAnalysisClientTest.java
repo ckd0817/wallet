@@ -103,4 +103,26 @@ public class AssetScreenshotAnalysisClientTest {
         assertEquals(0d, holding.optDouble("costAmount"), 0.0001d);
         assertEquals("missing", holding.optString("costSource"));
     }
+
+    @Test
+    public void normalizesUsTickerAndCurrency() throws Exception {
+        JSONArray normalized = new AssetScreenshotAnalysisClient().normalizeHoldings(
+            new JSONArray()
+                .put(
+                    new JSONObject()
+                        .put("assetType", "stock")
+                        .put("code", "brk-b")
+                        .put("market", "us")
+                        .put("name", "伯克希尔")
+                        .put("shares", 2d)
+                        .put("totalCost", 900d)
+                )
+        );
+
+        JSONObject holding = normalized.optJSONObject(0);
+        assertEquals("BRK.B", holding.optString("code"));
+        assertEquals("us", holding.optString("market"));
+        assertEquals("USD", holding.optString("currency"));
+        assertEquals(900d, holding.optDouble("costAmount"), 0.0001d);
+    }
 }

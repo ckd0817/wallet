@@ -7,6 +7,8 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 import org.junit.Test;
 
+import java.util.Arrays;
+
 public class AssetQuoteClientTest {
 
     @Test
@@ -49,6 +51,31 @@ public class AssetQuoteClientTest {
         assertEquals("000001", indexQuote.optString("code"));
         assertEquals("上证指数", indexQuote.optString("name"));
         assertEquals(0.33d, indexQuote.optDouble("changePercent"), 0.0001d);
+    }
+
+    @Test
+    public void parsesTencentUsStockQuoteText() {
+        AssetQuoteClient client = new AssetQuoteClient();
+        String[] fields = new String[33];
+        Arrays.fill(fields, "");
+        fields[1] = "苹果";
+        fields[3] = "328.21";
+        fields[30] = "20260903160001";
+        fields[32] = "1.00";
+
+        JSONArray quotes = client.parseStockQuotes(
+            "v_usAAPL=\"" + String.join("~", fields) + "\";",
+            "2026-09-04T08:00:00.000Z"
+        );
+
+        JSONObject quote = quotes.optJSONObject(0);
+        assertEquals("stock", quote.optString("assetType"));
+        assertEquals("AAPL", quote.optString("code"));
+        assertEquals("苹果", quote.optString("name"));
+        assertEquals(328.21d, quote.optDouble("price"), 0.0001d);
+        assertEquals(1d, quote.optDouble("changePercent"), 0.0001d);
+        assertEquals("USD", quote.optString("currency"));
+        assertEquals("tencent-us", quote.optString("source"));
     }
 
     @Test
