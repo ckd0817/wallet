@@ -93,6 +93,17 @@ export class Wallet {
         if(!existing) await this.set(change);
         continue;
       }
+      // 币种等展示字段的补全不属于一笔新交易。即使原持仓已清仓删除，也可安全更新历史记录。
+      const metadataFields = new Set(['assetType','code','name','currency']);
+      if(existing && current && trade && change.fields?.length && change.fields.every(field=>metadataFields.has(field))) {
+        const value = {...current};
+        for(const field of change.fields) {
+          if(Object.hasOwn(trade,field)) value[field]=trade[field];
+          else delete value[field];
+        }
+        await this.set({...change,value});
+        continue;
+      }
       // 已结算交易和删除标记不能被另一个设备重复执行。
       if(existing && (current===null || current?.status!=='pending')) continue;
       if(!trade) { await this.set(change); continue; }

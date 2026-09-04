@@ -273,7 +273,7 @@ const normalizeAssetTradeRecords = (assetTradeRecords?: AssetTradeRecord[] | nul
             assetType: record.assetType === 'stock' ? 'stock' : 'fund',
             code: typeof record.code === 'string' ? record.code : '',
             name: typeof record.name === 'string' ? record.name : '',
-            currency: record.currency === 'USD' || /[A-Za-z]/.test(record.code ?? '') ? 'USD' : 'CNY',
+            currency: record.currency === 'USD' ? 'USD' : record.currency === 'CNY' ? 'CNY' : undefined,
             tradeType:
               record.tradeType === 'sell' || record.tradeType === 'recurring' || record.tradeType === 'buy'
                 ? record.tradeType

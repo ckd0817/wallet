@@ -157,6 +157,28 @@ describe('assetEngine', () => {
     expect(snapshot.assetTradeRecords).toEqual([]);
   });
 
+  it('旧交易记录不因币种展示产生同步变更', () => {
+    const snapshot = normalizeSnapshot({
+      assetTradeRecords: [{
+        id: 'old-trade',
+        holdingId: 'deleted-holding',
+        assetType: 'fund',
+        code: '021000',
+        name: '基金',
+        tradeType: 'recurring',
+        source: 'recurring',
+        status: 'pending',
+        shares: 0,
+        amount: 50,
+        price: 0,
+        occurredAt: '2026-06-30T00:00:00.000Z',
+        createdAt: '2026-06-29T16:12:10.501Z',
+      }],
+    });
+
+    expect(JSON.stringify(snapshot.assetTradeRecords[0])).not.toContain('"currency"');
+  });
+
   it('小数持仓成本按单位成本归一为总成本', () => {
     const candidate = normalizeAssetImportCandidate({
       assetType: 'fund',

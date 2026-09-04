@@ -61,6 +61,22 @@ test('美股持仓和美元交易通过协议校验',async()=>{
   assert.equal(rows.find((row:any)=>row.id==='us-h').value.currency,'USD');
   assert.equal(rows.find((row:any)=>row.id==='us-t').value.code,'BRK.B');
 });
+test('已删除持仓的历史交易可补全展示字段',async()=>{
+  const u=await account();
+  const holding={id:'deleted-h',assetType:'fund',code:'021000',market:'fund',name:'基金',shares:1,costAmount:1,createdAt:'2026-09-04',updatedAt:'2026-09-04'};
+  const pending={id:'pending-t',holdingId:'deleted-h',assetType:'fund',code:'021000',name:'基金',tradeType:'recurring',source:'recurring',status:'pending',shares:0,amount:50,price:0,occurredAt:'2026-09-04',createdAt:'2026-09-04'};
+  assert.equal((await push(u,[op([
+    {kind:'assetHoldings',id:'deleted-h',value:holding},
+    {kind:'assetTradeRecords',id:'pending-t',value:pending},
+  ],'seed')])).statusCode,200);
+  assert.equal((await push(u,[op([{kind:'assetHoldings',id:'deleted-h',value:null}])])).statusCode,200);
+  const updated={...pending,currency:'CNY'};
+  const response=await push(u,[op([{kind:'assetTradeRecords',id:'pending-t',value:updated,fields:['currency']}])]);
+  assert.equal(response.statusCode,200,response.body);
+  const rows=(await call(u,'GET','/sync/pull?cursor=0')).json().changes;
+  assert.equal(rows.find((row:any)=>row.id==='pending-t').value.currency,'CNY');
+  assert.equal(rows.find((row:any)=>row.id==='pending-t').value.status,'pending');
+});
 test('周期重复执行和投资结算只记一次，独立买入累加',async()=>{
   const u=await account();
   const holding={id:'h',assetType:'fund',code:'000001',market:'fund',name:'基金',shares:10,costAmount:100,createdAt:'2026-09-04',updatedAt:'2026-09-04'};
