@@ -31,15 +31,18 @@ import {
   buildAssetPerformanceSnapshot,
   buildAssetPositions,
   buildAssetSummary,
+  convertAssetPositionsToCny,
   AssetCostSource,
   inferAssetMarket,
   inferAssetCurrency,
   getAssetCurrency,
+  getUsdCnyRate,
   isDelayedSettlementFund,
   mergeAssetPerformanceHistory,
   normalizeAssetCode,
   normalizeAssetImportCandidate,
 } from '../services/assetEngine';
+import { calculateWealthFreedom } from '../services/wealthFreedom';
 
 interface AnalysisProps {
   transactions: Transaction[];
@@ -95,7 +98,16 @@ const readOptionalAmount = (value: string) => {
   return Number.isFinite(amount) ? amount : Number.NaN;
 };
 
+const formatFreedomDays = (days: number) => {
+  if (days < 1) {
+    return '<1天';
+  }
+  return `${Math.floor(days).toLocaleString('zh-CN')}天`;
+};
+
 const Analysis: React.FC<AnalysisProps> = ({
+  transactions,
+  expenseAverageMonths,
   assetHoldings,
   assetQuoteCache,
   assetRecurringPlans,
@@ -125,10 +137,23 @@ const Analysis: React.FC<AnalysisProps> = ({
   const [recurringEnabled, setRecurringEnabled] = useState(false);
 
   const positions = useMemo(() => buildAssetPositions(assetHoldings, assetQuoteCache), [assetHoldings, assetQuoteCache]);
-  const cnyPositions = useMemo(() => positions.filter((position) => getAssetCurrency(position.holding) === 'CNY'), [positions]);
-  const usdPositions = useMemo(() => positions.filter((position) => getAssetCurrency(position.holding) === 'USD'), [positions]);
-  const cnySummary = useMemo(() => buildAssetSummary(cnyPositions), [cnyPositions]);
-  const usdSummary = useMemo(() => buildAssetSummary(usdPositions), [usdPositions]);
+  const usdCnyRate = useMemo(() => getUsdCnyRate(assetQuoteCache), [assetQuoteCache]);
+  const cnyPositions = useMemo(() => convertAssetPositionsToCny(positions, usdCnyRate), [positions, usdCnyRate]);
+  const summary = useMemo(() => buildAssetSummary(cnyPositions), [cnyPositions]);
+  const freedom = useMemo(
+    () => calculateWealthFreedom(summary.totalMarketValue, transactions, expenseAverageMonths),
+    [summary.totalMarketValue, transactions, expenseAverageMonths],
+  );
+  const freedomPeriodLabel = expenseAverageMonths === 12 ? '近1年' : `近${expenseAverageMonths}个月`;
+  const positionConversionRate = (holding: AssetHolding) => getAssetCurrency(holding) === 'USD' ? usdCnyRate : 1;
+  const formatPositionMoney = (amount: number, holding: AssetHolding) => {
+    const rate = positionConversionRate(holding);
+    return rate > 0 ? formatAssetMoney(amount * rate, 'CNY') : '暂无';
+  };
+  const formatPositionProfit = (amount: number, holding: AssetHolding, profitRate: number) => {
+    const rate = positionConversionRate(holding);
+    return rate > 0 ? `${formatSignedAssetMoney(amount * rate, 'CNY')} / ${profitRate.toFixed(1)}%` : '汇率暂不可用';
+  };
   const displayPerformanceHistory = useMemo(
     () =>
       mergeAssetPerformanceHistory(
@@ -141,7 +166,6 @@ const Analysis: React.FC<AnalysisProps> = ({
     [assetPerformanceHistory, assetQuoteCache, cnyPositions],
   );
   const distribution = useMemo(() => buildAssetHoldingDistribution(cnyPositions), [cnyPositions]);
-  const usdDistribution = useMemo(() => buildAssetHoldingDistribution(usdPositions), [usdPositions]);
   const editingHolding = useMemo(
     () => assetHoldings.find((holding) => holding.id === editingId) ?? null,
     [assetHoldings, editingId],
@@ -414,25 +438,22 @@ const Analysis: React.FC<AnalysisProps> = ({
   return (
     <div className="flex flex-col h-full animate-slide-up pb-24 space-y-6">
       <div className="grid grid-cols-2 gap-4">
+        <SummaryCard label="总资产" value={formatAssetMoney(summary.totalMarketValue, 'CNY')} />
         <SummaryCard
-          label="人民币资产"
-          value={formatAssetMoney(cnySummary.totalMarketValue, 'CNY')}
+          label="持有收益"
+          value={formatAssetMoney(summary.totalProfit, 'CNY')}
+          tone={summary.totalProfit >= 0 ? 'positive' : 'negative'}
+          subValue={`${summary.totalProfitRate.toFixed(1)}%`}
         />
         <SummaryCard
-          label="美元资产"
-          value={formatAssetMoney(usdSummary.totalMarketValue, 'USD')}
+          label="今日涨跌"
+          value={formatSignedAssetMoney(summary.dailyChangeAmount, 'CNY')}
+          tone={summary.dailyChangeAmount >= 0 ? 'positive' : 'negative'}
         />
         <SummaryCard
-          label="人民币收益"
-          value={formatAssetMoney(cnySummary.totalProfit, 'CNY')}
-          tone={cnySummary.totalProfit >= 0 ? 'positive' : 'negative'}
-          subValue={`今日 ${formatSignedAssetMoney(cnySummary.dailyChangeAmount, 'CNY')} · ${cnySummary.totalProfitRate.toFixed(1)}%`}
-        />
-        <SummaryCard
-          label="美元收益"
-          value={formatAssetMoney(usdSummary.totalProfit, 'USD')}
-          tone={usdSummary.totalProfit >= 0 ? 'positive' : 'negative'}
-          subValue={`今日 ${formatSignedAssetMoney(usdSummary.dailyChangeAmount, 'USD')} · ${usdSummary.totalProfitRate.toFixed(1)}%`}
+          label="不用上班天数"
+          value={freedom.days === null ? '暂无' : formatFreedomDays(freedom.days)}
+          subValue={freedom.days === null ? `${freedomPeriodLabel}无支出` : `${freedomPeriodLabel} · 日均 ¥${freedom.avgDailyExpense.toFixed(2)}`}
         />
       </div>
 
@@ -501,15 +522,15 @@ const Analysis: React.FC<AnalysisProps> = ({
                   </p>
                 </div>
                 <div className="text-right">
-                  <p className="text-base font-semibold text-primary">{formatAssetMoney(position.marketValue, getAssetCurrency(position.holding))}</p>
+                  <p className="text-base font-semibold text-primary">{formatPositionMoney(position.marketValue, position.holding)}</p>
                   <p className={`text-xs ${position.profit >= 0 ? 'text-danger' : 'text-success'}`}>
-                    {position.profit >= 0 ? '+' : ''}{position.profit.toFixed(2)} / {position.profitRate.toFixed(1)}%
+                    {formatPositionProfit(position.profit, position.holding, position.profitRate)}
                   </p>
                 </div>
               </div>
               <div className="grid grid-cols-3 gap-3 text-xs">
                 <Meta label="份额" value={position.holding.shares.toFixed(2)} />
-                <Meta label="总成本" value={formatAssetMoney(position.holding.costAmount, getAssetCurrency(position.holding))} />
+                <Meta label="总成本" value={formatPositionMoney(position.holding.costAmount, position.holding)} />
                 <Meta
                   label="涨跌幅"
                   value={position.quote ? `${position.quote.changePercent >= 0 ? '+' : ''}${position.quote.changePercent.toFixed(2)}%` : '暂无'}
@@ -526,7 +547,7 @@ const Analysis: React.FC<AnalysisProps> = ({
         <ProfitAnalytics
           history={displayPerformanceHistory}
           distribution={distribution}
-          usdDistribution={usdDistribution}
+          usdDistribution={[]}
           showCnyHistory={cnyPositions.length > 0 || assetPerformanceHistory.length > 0}
         />
       )}

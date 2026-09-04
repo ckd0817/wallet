@@ -7,6 +7,8 @@ import {
   buildAssetPerformanceSnapshot,
   buildAssetPositions,
   calculateNextAssetRecurringDate,
+  convertAssetPositionsToCny,
+  getUsdCnyRate,
   isLikelyMarketOpenForHolding,
   mergeAssetPerformanceHistory,
   normalizeAssetCode,
@@ -17,11 +19,28 @@ import {
   parseSinaFundQuoteResponse,
   parseTencentFundQuoteResponse,
   parseTencentStockQuoteResponse,
+  parseUsdCnyRateResponse,
   resolveAssetTotalCost,
 } from './assetEngine';
 import { normalizeSnapshot } from './walletStore';
 
 describe('assetEngine', () => {
+  it('解析美元兑人民币汇率并换算持仓', () => {
+    const rateQuote = parseUsdCnyRateResponse(
+      '{"base":"USD","quote":"CNY","rate":6.717,"date":"2026-09-04","source":"frankfurter","fetchedAt":"2026-09-04T08:00:00.000Z"}',
+    );
+    expect(rateQuote).toMatchObject({ assetType: 'index', code: 'USDCNY', price: 6.717, currency: 'CNY' });
+
+    const positions = buildAssetPositions(
+      [{ id: 'us', assetType: 'stock', code: 'NVDA', market: 'us', currency: 'USD', name: '英伟达', shares: 2, costAmount: 20, createdAt: '2026-09-04', updatedAt: '2026-09-04' }],
+      [{ assetType: 'stock', code: 'NVDA', name: '英伟达', price: 12, changePercent: 2, quoteTime: '2026-09-04', source: 'test', syncedAt: '2026-09-04T08:00:00.000Z', currency: 'USD' }],
+    );
+    const converted = convertAssetPositionsToCny(positions, getUsdCnyRate([rateQuote!]));
+    expect(converted[0].marketValue).toBeCloseTo(24 * 6.717);
+    expect(converted[0].holding.costAmount).toBeCloseTo(20 * 6.717);
+    expect(converted[0].profit).toBeCloseTo(4 * 6.717);
+  });
+
   it('解析天天基金估值 JSONP', () => {
     const quote = parseFundQuoteResponse(
       'jsonpgz({"fundcode":"000001","name":"华夏成长混合","jzrq":"2026-06-17","dwjz":"1.4070","gsz":"1.4461","gszzl":"2.78","gztime":"2026-06-18 15:00"});',

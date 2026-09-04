@@ -1,6 +1,7 @@
 package com.smartwallet.app.assets;
 
 import android.util.Log;
+import com.smartwallet.app.data.CloudSync;
 import java.io.BufferedReader;
 import java.io.InputStream;
 import java.io.InputStreamReader;
@@ -40,6 +41,7 @@ public class AssetQuoteClient {
         }
 
         StringBuilder stockQuery = new StringBuilder();
+        boolean hasUsdHolding = false;
         for (int index = 0; index < holdings.length(); index++) {
             JSONObject holding = holdings.optJSONObject(index);
             if (holding == null) {
@@ -49,6 +51,7 @@ public class AssetQuoteClient {
             String rawCode = holding.optString("code", "");
             String market = holding.optString("market", "");
             boolean isUs = "us".equals(market) || rawCode.matches(".*[A-Za-z].*");
+            hasUsdHolding = hasUsdHolding || isUs;
             String code = isUs ? normalizeUsCode(rawCode) : normalizeCode(rawCode);
             if (code.isEmpty()) {
                 continue;
@@ -84,7 +87,38 @@ public class AssetQuoteClient {
             }
         }
 
+        if (hasUsdHolding) {
+            JSONObject exchangeRate = fetchUsdCnyRate();
+            if (exchangeRate != null) {
+                quotes.put(exchangeRate);
+            }
+        }
+
         return quotes;
+    }
+
+    public JSONObject parseUsdCnyRate(String content, String syncedAt) {
+        try {
+            JSONObject payload = new JSONObject(content == null ? "" : content.trim());
+            double rate = payload.optDouble("rate", 0d);
+            String date = payload.optString("date", "");
+            if (!"USD".equals(payload.optString("base")) || !"CNY".equals(payload.optString("quote")) || rate <= 0 || !date.matches("\\d{4}-\\d{2}-\\d{2}")) {
+                return null;
+            }
+            JSONObject quote = new JSONObject();
+            safePut(quote, "assetType", "index");
+            safePut(quote, "code", "USDCNY");
+            safePut(quote, "name", "美元兑人民币");
+            safePut(quote, "price", rate);
+            safePut(quote, "changePercent", 0d);
+            safePut(quote, "quoteTime", date);
+            safePut(quote, "source", firstNonEmpty(payload.optString("source"), "wallet-server"));
+            safePut(quote, "syncedAt", firstNonEmpty(payload.optString("fetchedAt"), syncedAt));
+            safePut(quote, "currency", "CNY");
+            return quote;
+        } catch (Exception ignored) {
+            return null;
+        }
     }
 
     public JSONObject parseFundQuote(String content, String syncedAt) {
@@ -300,6 +334,20 @@ public class AssetQuoteClient {
             return parseStockQuotes(content, nowIsoString());
         } catch (Exception ignored) {
             return new JSONArray();
+        }
+    }
+
+    private JSONObject fetchUsdCnyRate() {
+        try {
+            String content = request(
+                CloudSync.API + "/market/exchange-rate?base=USD&quote=CNY",
+                StandardCharsets.UTF_8,
+                null
+            );
+            return parseUsdCnyRate(content, nowIsoString());
+        } catch (Exception exception) {
+            Log.w(TAG, "Exchange rate request failed", exception);
+            return null;
         }
     }
 

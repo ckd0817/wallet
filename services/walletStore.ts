@@ -26,11 +26,13 @@ import {
   normalizeAssetHolding,
   normalizeAssetPerformanceSnapshot,
   normalizeAssetQuote,
+  getAssetCurrency,
   parseEastmoneyFundQuoteResponse,
   parseFundQuoteResponse,
   parseSinaFundQuoteResponse,
   parseTencentFundQuoteResponse,
   parseTencentStockQuoteResponse,
+  parseUsdCnyRateResponse,
 } from './assetEngine';
 import { normalizeCategoryState } from './categoryState';
 
@@ -494,6 +496,14 @@ export const syncWebAssetQuotes = async (
     const query = [...stockTargets, 'sh000001'].join(',');
     const response = await fetch(`https://qt.gtimg.cn/q=${encodeURIComponent(query)}`);
     quotes.push(...parseTencentStockQuoteResponse(await response.text(), syncedAt));
+  }
+
+  if (assetHoldings.some((holding) => getAssetCurrency(holding) === 'USD')) {
+    const response = await fetch('https://152.32.147.55:8443/api/v1/market/exchange-rate?base=USD&quote=CNY');
+    const quote = parseUsdCnyRateResponse(await response.text(), syncedAt);
+    if (quote) {
+      quotes.push(quote);
+    }
   }
 
   for (const holding of funds) {

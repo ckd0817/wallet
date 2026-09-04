@@ -226,6 +226,55 @@ export const normalizeAssetQuote = (quote: Partial<AssetQuote>): AssetQuote | nu
   };
 };
 
+export const parseUsdCnyRateResponse = (content: string, syncedAt = new Date().toISOString()): AssetQuote | null => {
+  try {
+    const payload = JSON.parse(content) as Record<string, unknown>;
+    const rate = Number(payload.rate);
+    const date = typeof payload.date === 'string' ? payload.date : '';
+    if (payload.base !== 'USD' || payload.quote !== 'CNY' || !Number.isFinite(rate) || rate <= 0 || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return null;
+    }
+    return {
+      assetType: 'index',
+      code: 'USDCNY',
+      name: '美元兑人民币',
+      price: rate,
+      changePercent: 0,
+      quoteTime: date,
+      source: typeof payload.source === 'string' && payload.source ? payload.source : 'wallet-server',
+      syncedAt: typeof payload.fetchedAt === 'string' && payload.fetchedAt ? payload.fetchedAt : syncedAt,
+      currency: 'CNY',
+    };
+  } catch {
+    return null;
+  }
+};
+
+export const getUsdCnyRate = (quotes: AssetQuote[]) => {
+  const rate = quotes.find((quote) => quote.assetType === 'index' && quote.code === 'USDCNY')?.price ?? 0;
+  return Number.isFinite(rate) && rate > 0 ? rate : 0;
+};
+
+export const convertAssetPositionsToCny = (positions: AssetPositionView[], usdCnyRate: number) =>
+  positions.flatMap((position) => {
+    if (getAssetCurrency(position.holding) === 'CNY') {
+      return [position];
+    }
+    if (!Number.isFinite(usdCnyRate) || usdCnyRate <= 0) {
+      return [];
+    }
+    return [{
+      ...position,
+      holding: {
+        ...position.holding,
+        costAmount: position.holding.costAmount * usdCnyRate,
+      },
+      marketValue: position.marketValue * usdCnyRate,
+      profit: position.profit * usdCnyRate,
+      dailyChangeAmount: position.dailyChangeAmount * usdCnyRate,
+    }];
+  });
+
 export const normalizeAssetPerformanceSnapshot = (
   snapshot: Partial<AssetPerformanceSnapshot>,
 ): AssetPerformanceSnapshot | null => {

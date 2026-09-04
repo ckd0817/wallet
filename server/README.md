@@ -2,6 +2,8 @@
 
 运行架构：Node.js 24 / Fastify / PostgreSQL 16，Nginx 暴露 HTTPS 8443。应用与 PostgreSQL 仅监听回环地址。当前地址为 https://152.32.147.55:8443。
 
+`GET /api/v1/market/exchange-rate?base=USD&quote=CNY` 返回美元兑人民币参考汇率。服务端缓存六小时；上游暂时不可用时沿用最近一次有效值。
+
 ## 部署
 
 目标主机为 Ubuntu 24.04，已有 443 服务继续运行。首次准备环境：

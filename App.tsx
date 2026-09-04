@@ -70,8 +70,10 @@ import {
   applyAssetRecurringPurchaseWithQuote,
   buildAssetPerformanceSnapshot,
   buildAssetPositions,
+  convertAssetPositionsToCny,
   getAssetCurrency,
   getAssetQuoteConfirmedDate,
+  getUsdCnyRate,
   isDelayedSettlementFund,
   isLikelyMarketOpenForHolding,
   mergeAssetPerformanceHistory,
@@ -1008,8 +1010,10 @@ const App: React.FC = () => {
         const updatedQuoteCache = Array.from(quoteMap.values());
         const benchmarkQuote = updatedQuoteCache.find((quote) => quote.assetType === 'index' && quote.code === '000001');
         const nextPerformanceSnapshot = buildAssetPerformanceSnapshot(
-          buildAssetPositions(assetHoldingsWithNames, updatedQuoteCache)
-            .filter((position) => getAssetCurrency(position.holding) === 'CNY'),
+          convertAssetPositionsToCny(
+            buildAssetPositions(assetHoldingsWithNames, updatedQuoteCache),
+            getUsdCnyRate(updatedQuoteCache),
+          ),
           benchmarkQuote,
         );
         const nextSnapshot = normalizeSnapshot({

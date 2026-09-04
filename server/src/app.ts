@@ -7,12 +7,14 @@ import { transaction } from './db.js';
 import { vault,token,hash } from './crypto.js';
 import { pushSchema,validateBackup,HttpError } from './protocol.js';
 import { Wallet } from './sync.js';
+import { createUsdCnyRateProvider } from './exchangeRate.js';
 
 const credentials=z.object({username:z.string().trim().min(3).max(40).regex(/^[a-zA-Z0-9_\-\u4e00-\u9fff]+$/).transform(v=>v.toLowerCase()),
   password:z.string().min(8).max(128)}).strict();
 export function buildApp(pool:pg.Pool,masterKey:string) {
   const app=Fastify({bodyLimit:20*1024*1024,logger:false});
   const secrets=vault(masterKey);
+  const getUsdCnyRate=createUsdCnyRateProvider();
   async function authenticate(header:string|undefined) {
     if(!header?.startsWith('Bearer ')) throw new HttpError(401,'请重新登录');
     const row=(await pool.query('SELECT s.id,s.user_id,u.username FROM sessions s JOIN users u ON u.id=s.user_id WHERE access_hash=$1 AND access_expires>now() AND refresh_expires>now()',
@@ -39,6 +41,10 @@ export function buildApp(pool:pg.Pool,masterKey:string) {
     return reply.code(500).send({message:'服务暂时不可用'});
   });
   app.get('/health',async()=>{await pool.query('SELECT 1');return {ok:true,protocolVersion:1};});
+  app.get('/api/v1/market/exchange-rate',async req=>{
+    z.object({base:z.literal('USD').default('USD'),quote:z.literal('CNY').default('CNY')}).strict().parse(req.query);
+    return getUsdCnyRate();
+  });
   app.post('/api/v1/auth/register',async(req,reply)=>{
     const data=credentials.parse(req.body);
     const id=randomUUID(),passwordHash=await argon2.hash(data.password,{type:argon2.argon2id});

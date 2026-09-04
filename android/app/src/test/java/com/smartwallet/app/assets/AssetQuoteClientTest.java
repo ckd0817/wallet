@@ -1,6 +1,7 @@
 package com.smartwallet.app.assets;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
 import org.json.JSONArray;
@@ -10,6 +11,19 @@ import org.junit.Test;
 import java.util.Arrays;
 
 public class AssetQuoteClientTest {
+
+    @Test
+    public void parsesUsdCnyRate() throws Exception {
+        JSONObject quote = new AssetQuoteClient().parseUsdCnyRate(
+            "{\"base\":\"USD\",\"quote\":\"CNY\",\"rate\":6.717,\"date\":\"2026-09-04\",\"source\":\"frankfurter\"}",
+            "2026-09-04T08:00:00.000Z"
+        );
+
+        assertNotNull(quote);
+        assertEquals("USDCNY", quote.getString("code"));
+        assertEquals(6.717, quote.getDouble("price"), 0.0001);
+        assertEquals("CNY", quote.getString("currency"));
+    }
 
     @Test
     public void parsesFundQuoteJsonp() {
