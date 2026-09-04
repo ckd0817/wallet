@@ -144,7 +144,9 @@ const Analysis: React.FC<AnalysisProps> = ({
     () => calculateWealthFreedom(summary.totalMarketValue, transactions, expenseAverageMonths),
     [summary.totalMarketValue, transactions, expenseAverageMonths],
   );
-  const freedomPeriodLabel = expenseAverageMonths === 12 ? '近1年' : `近${expenseAverageMonths}个月`;
+  const hasUsdPositions = positions.some((position) => getAssetCurrency(position.holding) === 'USD');
+  const dailyBaseValue = summary.totalMarketValue - summary.dailyChangeAmount;
+  const dailyChangeRate = dailyBaseValue > 0 ? summary.dailyChangeAmount / dailyBaseValue * 100 : 0;
   const positionConversionRate = (holding: AssetHolding) => getAssetCurrency(holding) === 'USD' ? usdCnyRate : 1;
   const formatPositionMoney = (amount: number, holding: AssetHolding) => {
     const rate = positionConversionRate(holding);
@@ -436,9 +438,13 @@ const Analysis: React.FC<AnalysisProps> = ({
   };
 
   return (
-    <div className="flex flex-col h-full animate-slide-up pb-24 space-y-6">
-      <div className="grid grid-cols-2 gap-4">
-        <SummaryCard label="总资产" value={formatAssetMoney(summary.totalMarketValue, 'CNY')} />
+    <div className="flex flex-col h-full animate-slide-up pb-24 space-y-4">
+      <div className="grid grid-cols-2 gap-3">
+        <SummaryCard
+          label="总资产"
+          value={formatAssetMoney(summary.totalMarketValue, 'CNY')}
+          subValue={hasUsdPositions ? (usdCnyRate > 0 ? `USD/CNY ${usdCnyRate.toFixed(3)}` : '汇率暂不可用') : `${positions.length}项资产`}
+        />
         <SummaryCard
           label="持有收益"
           value={formatAssetMoney(summary.totalProfit, 'CNY')}
@@ -449,15 +455,16 @@ const Analysis: React.FC<AnalysisProps> = ({
           label="今日涨跌"
           value={formatSignedAssetMoney(summary.dailyChangeAmount, 'CNY')}
           tone={summary.dailyChangeAmount >= 0 ? 'positive' : 'negative'}
+          subValue={formatSignedPercent(dailyChangeRate)}
         />
         <SummaryCard
           label="不用上班天数"
           value={freedom.days === null ? '暂无' : formatFreedomDays(freedom.days)}
-          subValue={freedom.days === null ? `${freedomPeriodLabel}无支出` : `${freedomPeriodLabel} · 日均 ¥${freedom.avgDailyExpense.toFixed(2)}`}
+          subValue={freedom.days === null ? '暂无日均支出' : `¥${freedom.avgDailyExpense.toFixed(2)}/天`}
         />
       </div>
 
-      <div className="grid grid-cols-4 gap-2">
+      <div className="grid grid-cols-4 gap-1 rounded-2xl border border-border bg-surface p-1">
         <AssetActionButton icon={Plus} label="添加资产" onClick={openAddForm} />
         <AssetActionButton icon={ReceiptText} label="交易记录" onClick={() => setIsTradeRecordsOpen(true)} />
         <AssetActionButton icon={Camera} label="截图导入" onClick={() => fileInputRef.current?.click()} />
@@ -505,30 +512,30 @@ const Analysis: React.FC<AnalysisProps> = ({
           <p className="text-lg font-light">暂无持仓</p>
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-2">
           {positions.map((position) => (
             <button
               key={position.holding.id}
               onClick={() => openEditForm(position.holding)}
-              className="w-full bg-white border border-border p-5 rounded-2xl text-left"
+              className="w-full rounded-xl border border-border bg-white p-4 text-left"
             >
-              <div className="flex items-start justify-between gap-4 mb-4">
+              <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 mb-3">
                 <div className="min-w-0">
-                  <p className="text-base font-semibold text-primary truncate">
+                  <p className="line-clamp-2 text-[15px] font-semibold leading-5 text-primary">
                     {position.quote?.name || position.holding.name || position.holding.code}
                   </p>
                   <p className="text-xs text-secondary mt-1">
                     {formatAssetKind(position.holding)} · {position.holding.code}
                   </p>
                 </div>
-                <div className="text-right">
-                  <p className="text-base font-semibold text-primary">{formatPositionMoney(position.marketValue, position.holding)}</p>
+                <div className="text-right whitespace-nowrap">
+                  <p className="text-[15px] font-semibold text-primary">{formatPositionMoney(position.marketValue, position.holding)}</p>
                   <p className={`text-xs ${position.profit >= 0 ? 'text-danger' : 'text-success'}`}>
                     {formatPositionProfit(position.profit, position.holding, position.profitRate)}
                   </p>
                 </div>
               </div>
-              <div className="grid grid-cols-3 gap-3 text-xs">
+              <div className="grid grid-cols-3 gap-2 text-[11px]">
                 <Meta label="份额" value={position.holding.shares.toFixed(2)} />
                 <Meta label="总成本" value={formatPositionMoney(position.holding.costAmount, position.holding)} />
                 <Meta
@@ -745,12 +752,14 @@ const Analysis: React.FC<AnalysisProps> = ({
 };
 
 const SummaryCard = ({ label, value, subValue, tone }: { label: string; value: string; subValue?: string; tone?: 'positive' | 'negative' }) => (
-  <div className="bg-white border border-border p-5 rounded-2xl">
-    <p className="text-xs text-secondary uppercase tracking-wider mb-2">{label}</p>
-    <p className={`text-2xl font-bold ${tone === 'positive' ? 'text-danger' : tone === 'negative' ? 'text-success' : 'text-primary'}`}>
-      {value}
-    </p>
-    {subValue && <p className="text-xs text-secondary mt-1">{subValue}</p>}
+  <div className="flex h-28 min-w-0 flex-col justify-between rounded-2xl border border-border bg-white p-4">
+    <p className="text-[13px] font-medium text-secondary">{label}</p>
+    <div className="min-w-0">
+      <p className={`whitespace-nowrap text-[1.7rem] font-bold leading-tight tracking-tight ${tone === 'positive' ? 'text-danger' : tone === 'negative' ? 'text-success' : 'text-primary'}`}>
+        {value}
+      </p>
+      <p className="mt-1 h-4 truncate text-xs leading-4 text-secondary">{subValue || '\u00a0'}</p>
+    </div>
   </div>
 );
 
@@ -772,10 +781,10 @@ const AssetActionButton = ({
     onClick={onClick}
     disabled={disabled}
     title={label}
-    className="h-16 min-w-0 rounded-2xl border border-border bg-white text-primary flex flex-col items-center justify-center gap-1 text-[11px] font-semibold transition active:scale-[0.98] disabled:opacity-50"
+    className="flex h-12 min-w-0 items-center justify-center gap-1 rounded-xl text-[11px] font-semibold text-primary transition active:scale-[0.98] active:bg-white disabled:opacity-50"
   >
-    <Icon className={`w-5 h-5 ${active ? 'animate-spin' : ''}`} />
-    <span className="w-full truncate px-1 text-center">{label}</span>
+    <Icon className={`h-4 w-4 shrink-0 ${active ? 'animate-spin' : ''}`} />
+    <span className="truncate">{label}</span>
   </button>
 );
 
@@ -1430,10 +1439,10 @@ const formatDateTime = (value: string) => {
 const profitTone = (value: number) => (value >= 0 ? 'text-danger' : 'text-success');
 
 const formatAssetMoney = (value: number, currency: AssetCurrency, digits = 2) =>
-  `${currency === 'USD' ? '$' : '¥'}${value.toFixed(digits)}`;
+  `${value < 0 ? '-' : ''}${currency === 'USD' ? '$' : '¥'}${Math.abs(value).toLocaleString('zh-CN', { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
 
 const formatSignedAssetMoney = (value: number, currency: AssetCurrency, digits = 2) =>
-  `${value >= 0 ? '+' : '-'}${currency === 'USD' ? '$' : '¥'}${Math.abs(value).toFixed(digits)}`;
+  `${value >= 0 ? '+' : '-'}${currency === 'USD' ? '$' : '¥'}${Math.abs(value).toLocaleString('zh-CN', { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
 
 const formatAssetKind = (asset: { assetType: AssetType; market?: AssetHolding['market']; code: string }) => {
   if (asset.assetType === 'fund') {
