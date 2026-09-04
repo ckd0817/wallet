@@ -40,7 +40,6 @@ import {
   normalizeAssetCode,
   normalizeAssetImportCandidate,
 } from '../services/assetEngine';
-import { calculateWealthFreedom } from '../services/wealthFreedom';
 
 interface AnalysisProps {
   transactions: Transaction[];
@@ -96,16 +95,7 @@ const readOptionalAmount = (value: string) => {
   return Number.isFinite(amount) ? amount : Number.NaN;
 };
 
-const formatFreedomDays = (days: number) => {
-  if (days < 1) {
-    return '<1天';
-  }
-  return `${Math.floor(days).toLocaleString('zh-CN')}天`;
-};
-
 const Analysis: React.FC<AnalysisProps> = ({
-  transactions,
-  expenseAverageMonths,
   assetHoldings,
   assetQuoteCache,
   assetRecurringPlans,
@@ -139,15 +129,6 @@ const Analysis: React.FC<AnalysisProps> = ({
   const usdPositions = useMemo(() => positions.filter((position) => getAssetCurrency(position.holding) === 'USD'), [positions]);
   const cnySummary = useMemo(() => buildAssetSummary(cnyPositions), [cnyPositions]);
   const usdSummary = useMemo(() => buildAssetSummary(usdPositions), [usdPositions]);
-  const showCnySummary = cnyPositions.length > 0 || usdPositions.length === 0;
-  const primarySummary = showCnySummary ? cnySummary : usdSummary;
-  const primaryCurrency: AssetCurrency = showCnySummary ? 'CNY' : 'USD';
-  const secondarySummary = showCnySummary && usdPositions.length > 0 ? usdSummary : null;
-  const freedom = useMemo(
-    () => calculateWealthFreedom(cnySummary.totalMarketValue, transactions, expenseAverageMonths),
-    [cnySummary.totalMarketValue, transactions, expenseAverageMonths],
-  );
-  const freedomPeriodLabel = expenseAverageMonths === 12 ? '近1年' : `近${expenseAverageMonths}个月`;
   const displayPerformanceHistory = useMemo(
     () =>
       mergeAssetPerformanceHistory(
@@ -434,26 +415,24 @@ const Analysis: React.FC<AnalysisProps> = ({
     <div className="flex flex-col h-full animate-slide-up pb-24 space-y-6">
       <div className="grid grid-cols-2 gap-4">
         <SummaryCard
-          label="总资产"
-          value={formatAssetMoney(primarySummary.totalMarketValue, primaryCurrency)}
-          subValue={secondarySummary ? formatAssetMoney(secondarySummary.totalMarketValue, 'USD') : undefined}
+          label="人民币资产"
+          value={formatAssetMoney(cnySummary.totalMarketValue, 'CNY')}
         />
         <SummaryCard
-          label="持有收益"
-          value={formatAssetMoney(primarySummary.totalProfit, primaryCurrency)}
-          tone={primarySummary.totalProfit >= 0 ? 'positive' : 'negative'}
-          subValue={secondarySummary ? formatAssetMoney(secondarySummary.totalProfit, 'USD') : `${primarySummary.totalProfitRate.toFixed(1)}%`}
+          label="美元资产"
+          value={formatAssetMoney(usdSummary.totalMarketValue, 'USD')}
         />
         <SummaryCard
-          label="今日涨跌"
-          value={formatSignedAssetMoney(primarySummary.dailyChangeAmount, primaryCurrency)}
-          tone={primarySummary.dailyChangeAmount >= 0 ? 'positive' : 'negative'}
-          subValue={secondarySummary ? formatSignedAssetMoney(secondarySummary.dailyChangeAmount, 'USD') : undefined}
+          label="人民币收益"
+          value={formatAssetMoney(cnySummary.totalProfit, 'CNY')}
+          tone={cnySummary.totalProfit >= 0 ? 'positive' : 'negative'}
+          subValue={`今日 ${formatSignedAssetMoney(cnySummary.dailyChangeAmount, 'CNY')} · ${cnySummary.totalProfitRate.toFixed(1)}%`}
         />
         <SummaryCard
-          label="不用上班天数"
-          value={freedom.days === null ? '暂无' : formatFreedomDays(freedom.days)}
-          subValue={freedom.days === null ? `${freedomPeriodLabel}无支出` : `${freedomPeriodLabel} · 日均 ¥${freedom.avgDailyExpense.toFixed(2)}`}
+          label="美元收益"
+          value={formatAssetMoney(usdSummary.totalProfit, 'USD')}
+          tone={usdSummary.totalProfit >= 0 ? 'positive' : 'negative'}
+          subValue={`今日 ${formatSignedAssetMoney(usdSummary.dailyChangeAmount, 'USD')} · ${usdSummary.totalProfitRate.toFixed(1)}%`}
         />
       </div>
 
