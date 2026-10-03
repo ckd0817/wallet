@@ -76,6 +76,20 @@ test('已删除持仓的历史交易可补全展示字段',async()=>{
   const rows=(await call(u,'GET','/sync/pull?cursor=0')).json().changes;
   assert.equal(rows.find((row:any)=>row.id==='pending-t').value.currency,'CNY');
   assert.equal(rows.find((row:any)=>row.id==='pending-t').value.status,'pending');
+  // 新增输入方式和后续展示字段均不能再次结算这条孤立历史记录。
+  for(const [field,value] of [['inputMode','amount'],['displayNote','历史记录']]) {
+    const result=await push(u,[op([{kind:'assetTradeRecords',id:'pending-t',value:{...updated,[field]:value},fields:[field]}])]);
+    assert.equal(result.statusCode,200,result.body);
+    const retry=await call(u,'GET','/sync/pull?cursor=0');
+    const record=retry.json().changes.find((row:any)=>row.id==='pending-t').value;
+    assert.equal(record[field],value);
+    assert.equal(record.status,'pending');
+  }
+  // 真正的待确认 -> 已结算仍须检查持仓，不能靠展示字段绕过。
+  const settlement=await push(u,[op([{kind:'assetTradeRecords',id:'pending-t',
+    value:{...updated,status:'completed',inputMode:'shares',shares:1,price:50},fields:['status','shares','price','inputMode']}])]);
+  assert.equal(settlement.statusCode,409);
+  assert.equal(settlement.json().details.code,'HOLDING_DELETED');
 });
 test('周期重复执行和投资结算只记一次，独立买入累加',async()=>{
   const u=await account();

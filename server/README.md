@@ -16,6 +16,22 @@
 
 后续升级先备份数据库，再上传代码并执行 activate.sh。bootstrap.sh 仅用于首次准备；已有配置和证书应保留。
 
+## Android 应用更新
+
+可复用的完整操作步骤见 [Android 更新分发](../docs/Android更新分发.md)。
+
+应用启动时检查新版本；设置页可手动检查。用户确认后下载安装包，校验 SHA-256、应用 ID、递增版本号、Debug 状态和现有签名，再打开 Android 安装程序。首次更新可能需要允许“记账”安装应用，授权返回后继续安装。系统安装确认仍由用户完成。
+
+只构建和发布 Debug APK，沿用本机固定 Debug 签名。发布前递增 `android/app/build.gradle` 的 `versionCode`，并修改 `versionName`。在项目根目录执行：
+
+```powershell
+.\scripts\publish-android-update.ps1
+```
+
+脚本执行 `assembleDebug`，校验包名、可调试状态和固定签名，通过 SSH 上传并原子发布。`-SkipBuild` 可发布已经构建好的 Debug APK；版本号必须比服务器已发布版本大。安装包和 `latest.json` 保存在仓库外 `/var/lib/wallet/releases`，旧安装包保留供正在下载的客户端使用，不写入账本或凭据。
+
+`GET /api/v1/app-updates/android` 返回 `{release: null}` 或最新版本信息；`GET /api/v1/app-updates/android/:version.apk` 下载安装包。两个接口无需登录，不涉及用户数据。尚未包含更新功能的旧客户端需要先安装一次带更新功能的版本，之后通过应用内更新。
+
 配置文件位于 /etc/wallet/server.env，权限为 root:wallet 640：
 
 | 字段 | 用途 |
@@ -28,7 +44,7 @@
 
 ## 协议
 
-全部业务接口位于 /api/v1，除注册、登录及刷新外需要 Bearer 登录令牌。用户 ID 从会话确定，不接受客户端指定数据归属。
+全部业务接口位于 /api/v1，账户和账本接口除注册、登录及刷新外需要 Bearer 登录令牌。更新和行情接口公开提供。用户 ID 从会话确定，不接受客户端指定数据归属。
 
 | 接口 | 用途 |
 | --- | --- |

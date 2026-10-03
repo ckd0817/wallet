@@ -33,3 +33,15 @@ npm run android:sync   # 构建 Web 并同步到 Android 项目
 npm run android:open   # 在 Android Studio 中打开
 npm run android:run    # 构建并在连接的设备上运行
 ```
+
+## Android 更新分发
+
+始终使用 Debug APK 和本机固定 Debug 签名。应用启动时检查服务器版本，设置页也可手动检查更新。
+
+发布前递增 `android/app/build.gradle` 中的版本号，在项目根目录执行：
+
+```powershell
+.\scripts\publish-android-update.ps1
+```
+
+完整的构建、发布、校验、首次接入和故障处理步骤见 [Android 更新分发](docs/Android更新分发.md)。

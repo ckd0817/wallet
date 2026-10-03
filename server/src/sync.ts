@@ -93,9 +93,9 @@ export class Wallet {
         if(!existing) await this.set(change);
         continue;
       }
-      // 币种等展示字段的补全不属于一笔新交易。即使原持仓已清仓删除，也可安全更新历史记录。
-      const metadataFields = new Set(['assetType','code','name','currency']);
-      if(existing && current && trade && change.fields?.length && change.fields.every(field=>metadataFields.has(field))) {
+      // 仅改变非结算字段时只更新历史记录；新增展示字段也不能触发旧交易重新结算。
+      const settlementFields = new Set(['id','holdingId','status','tradeType','source','shares','amount','price','occurredAt','createdAt','recurringPlanId','executionKey']);
+      if(existing && current && trade && change.fields?.length && change.fields.every(field=>!settlementFields.has(field))) {
         const value = {...current};
         for(const field of change.fields) {
           if(Object.hasOwn(trade,field)) value[field]=trade[field];

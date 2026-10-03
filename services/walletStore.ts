@@ -282,6 +282,7 @@ const normalizeAssetTradeRecords = (assetTradeRecords?: AssetTradeRecord[] | nul
                 : 'buy',
             source: record.source === 'recurring' ? 'recurring' : 'manual',
             status: record.status === 'pending' ? 'pending' : 'completed',
+            inputMode: record.inputMode === 'shares' ? 'shares' : 'amount',
             recurringPlanId: typeof record.recurringPlanId === 'string' && record.recurringPlanId ? record.recurringPlanId : undefined,
             shares,
             amount,

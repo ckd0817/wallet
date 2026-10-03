@@ -26,6 +26,17 @@
 - 不需要 Release 打包、Release 签名密码或正式发布流程。
 - 安装前核对签名；不兼容时保留旧应用，先完成并校验数据备份，不直接卸载。
 
+## 应用内更新记忆
+
+- 完整可复用流程见 `docs/Android更新分发.md`，发布前按文档查询服务器最新版本并完成相应检查。
+
+- 应用启动时向现有云服务器检查更新，设置页保留手动检查入口。
+- 对用户分发新版本时，使用 `scripts\publish-android-update.ps1` 构建并发布 Debug APK，不再逐个发送安装包。
+- 发布前递增 `android\app\build.gradle` 的 `versionCode` 并更新 `versionName`，不得覆盖已发布的版本号。
+- 更新服务地址：`https://152.32.147.55:8443/api/v1/app-updates/android`。
+- 服务端版本清单与安装包保存在仓库外 `/var/lib/wallet/releases`，沿用本机固定 Debug 签名。
+- 更新下载后校验 SHA-256、包名、版本号、可调试状态和当前应用签名，由 Android 系统确认覆盖安装。
+
 ## 数据迁移与云端
 
 - 当前唯一需要继承的数据是用户手机上的账本，允许为新架构重新设计格式。

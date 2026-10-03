@@ -1,6 +1,7 @@
+import { resolveAssetTradeQuantity } from '../services/assetTradeQuantity';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { CalendarClock, Camera, Plus, ReceiptText, Trash2 } from 'lucide-react';
+import { CalendarClock, Camera, Plus, ReceiptText, Trash2, X } from 'lucide-react';
 import {
   Area,
   Cell,
@@ -36,9 +37,11 @@ import {
   inferAssetMarket,
   inferAssetCurrency,
   getAssetCurrency,
+  getAssetDisplayName,
   getUsdCnyRate,
   isDelayedSettlementFund,
   mergeAssetPerformanceHistory,
+  mergeAssetHoldingDistribution,
   normalizeAssetCode,
   normalizeAssetImportCandidate,
 } from '../services/assetEngine';
@@ -57,6 +60,7 @@ interface AnalysisProps {
     id: string,
     holding: Omit<AssetHolding, 'id' | 'createdAt' | 'updatedAt'>,
     tradeRecord?: Omit<AssetTradeRecord, 'id' | 'createdAt'>,
+    recurringPlan?: Omit<AssetRecurringPlan, 'id' | 'createdAt' | 'updatedAt'> | null,
   ) => Promise<void> | void;
   onDeleteAssetHolding: (id: string) => Promise<void> | void;
   onSaveAssetRecurringPlan: (plan: Omit<AssetRecurringPlan, 'id' | 'createdAt' | 'updatedAt'>, existingId?: string) => Promise<void> | void;
@@ -123,6 +127,12 @@ const Analysis: React.FC<AnalysisProps> = ({
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [form, setForm] = useState<AssetFormState>(emptyForm);
+  const [costMode, setCostMode] = useState<'total' | 'average'>('total');
+  const [isSaving, setIsSaving] = useState(false);
+  const savingRef = useRef(false);
+  const initialDraft = useRef('');
+  const [deletePlan, setDeletePlan] = useState(false);
+  const [confirmation, setConfirmation] = useState<'discard' | 'delete' | null>(null);
   const [editingId, setEditingId] = useState('');
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isTradeRecordsOpen, setIsTradeRecordsOpen] = useState(false);
@@ -131,6 +141,8 @@ const Analysis: React.FC<AnalysisProps> = ({
   const [importCandidates, setImportCandidates] = useState<AssetImportCandidate[]>([]);
   const [operationType, setOperationType] = useState<AssetOperationType>('buy');
   const [operationAmount, setOperationAmount] = useState('');
+  const [operationUnit, setOperationUnit] = useState<'amount' | 'shares'>('amount');
+  const [operationShares, setOperationShares] = useState('');
   const [recurringAmount, setRecurringAmount] = useState('');
   const [recurringFrequency, setRecurringFrequency] = useState<AssetRecurringFrequency>('monthly');
   const [recurringNextDate, setRecurringNextDate] = useState(new Date().toISOString().split('T')[0]);
@@ -184,6 +196,8 @@ const Analysis: React.FC<AnalysisProps> = ({
   }, []);
 
   const openAddForm = () => {
+    setCostMode('total');
+    initialDraft.current = '';
     setEditingId('');
     setForm(emptyForm);
     setIsFormOpen(true);
@@ -191,6 +205,9 @@ const Analysis: React.FC<AnalysisProps> = ({
 
   const openEditForm = (holding: AssetHolding) => {
     const existingPlan = assetRecurringPlans.find((plan) => plan.holdingId === holding.id);
+    setCostMode('total');
+    setDeletePlan(false);
+    initialDraft.current = '';
     setEditingId(holding.id);
     setForm({
       assetKind: holding.assetType === 'fund' ? 'fund' : holding.market === 'us' ? 'us-stock' : 'cn-stock',
@@ -207,11 +224,15 @@ const Analysis: React.FC<AnalysisProps> = ({
   };
 
   const closeForm = () => {
+    setConfirmation(null);
+    setDeletePlan(false);
     setIsFormOpen(false);
     setEditingId('');
     setForm(emptyForm);
     setOperationType('buy');
     setOperationAmount('');
+    setOperationUnit('amount');
+    setOperationShares('');
     setRecurringAmount('');
     setRecurringFrequency('monthly');
     setRecurringNextDate(new Date().toISOString().split('T')[0]);
@@ -233,7 +254,11 @@ const Analysis: React.FC<AnalysisProps> = ({
     const shares = Number(form.shares || 0);
     const totalCost = readOptionalAmount(form.costAmount);
     const averageCost = readOptionalAmount(form.averageCost);
-    const costAmount = totalCost !== null ? totalCost : averageCost !== null ? averageCost * shares : 0;
+    const costAmount = costMode === 'total' ? totalCost ?? 0 : (averageCost ?? 0) * shares;
+    if (editingHolding) {
+      const { id, createdAt, updatedAt, ...identity } = editingHolding;
+      return { ...identity, shares, costAmount };
+    }
     return {
       assetType,
       code,
@@ -245,159 +270,121 @@ const Analysis: React.FC<AnalysisProps> = ({
     };
   };
 
+  const operationValue = operationUnit === 'shares' ? operationShares : operationAmount;
+  const draftKey = JSON.stringify({ assetKind: form.assetKind, code: form.code, shares: form.shares,
+    costAmount: Number(buildPayload().costAmount.toPrecision(12)), operationType: operationValue.trim() ? operationType : '', operationUnit: operationValue.trim() ? operationUnit : '', operationValue,
+    recurringAmount, recurringFrequency, recurringNextDate, recurringEnabled, deletePlan });
+  useEffect(() => {
+    if (isFormOpen && !initialDraft.current) initialDraft.current = draftKey;
+  }, [isFormOpen, draftKey]);
+
+  const requestClose = () => {
+    if (savingRef.current) return;
+    if (draftKey !== initialDraft.current) setConfirmation('discard');
+    else closeForm();
+  };
+
+  useEffect(() => {
+    if (!isFormOpen) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        if (confirmation) setConfirmation(null);
+        else requestClose();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isFormOpen, draftKey, confirmation]);
+
+  const switchCostMode = (mode: 'total' | 'average') => {
+    if (mode === costMode) return;
+    const shares = Number(form.shares);
+    if (!(shares > 0)) { alert('请先填写份额'); return; }
+    setForm(previous => mode === 'average'
+      ? { ...previous, averageCost: previous.costAmount.trim() ? String(Number(previous.costAmount) / shares) : '' }
+      : { ...previous, costAmount: previous.averageCost.trim() ? String(Number(previous.averageCost) * shares) : '' });
+    setCostMode(mode);
+  };
+
   const submitForm = async (event: React.FormEvent) => {
     event.preventDefault();
-    const payload = buildPayload();
-    if (!payload.code || !Number.isFinite(payload.shares) || payload.shares <= 0) {
-      alert('请填写完整持仓');
-      return;
+    if (savingRef.current) return;
+    let payload = buildPayload();
+    if (!payload.code || !Number.isFinite(payload.shares) || payload.shares < 0 || (!editingId && payload.shares === 0)) {
+      alert('请填写完整持仓'); return;
     }
     if (!Number.isFinite(payload.costAmount) || payload.costAmount < 0) {
-      alert('请检查成本');
-      return;
+      alert('请检查成本'); return;
     }
-
-    if (editingId) {
-      await onUpdateAssetHolding(editingId, payload);
-    } else {
-      await onAddAssetHolding(payload);
-    }
-    closeForm();
-  };
-
-  const applyAssetOperation = async () => {
-    if (!editingHolding) {
-      return;
-    }
-
-    const amountDelta = Number(operationAmount || 0);
-    if (!Number.isFinite(amountDelta) || amountDelta <= 0) {
-      alert('请输入金额');
-      return;
-    }
-
-    const currentPosition = positions.find((position) => position.holding.id === editingHolding.id);
-    const currentQuote = currentPosition?.quote;
-    const delayedSettlement = isDelayedSettlementFund({
-      ...editingHolding,
-      name: currentQuote?.name || editingHolding.name,
-    });
-
-    if (operationType === 'sell' && currentPosition && amountDelta > currentPosition.marketValue) {
-      alert('金额超出持仓');
-      return;
-    }
-
-    const nextPayload = {
-      assetType: editingHolding.assetType,
-      code: editingHolding.code,
-      market: editingHolding.market,
-      currency: getAssetCurrency(editingHolding),
-      name: editingHolding.name,
-      shares: editingHolding.shares,
-      costAmount: editingHolding.costAmount,
-    };
-
-    if (delayedSettlement) {
-      await onUpdateAssetHolding(editingHolding.id, nextPayload, {
-        holdingId: editingHolding.id,
-        assetType: editingHolding.assetType,
-        code: editingHolding.code,
-        name: currentQuote?.name || editingHolding.name,
-        currency: getAssetCurrency(editingHolding),
-        tradeType: operationType,
-        source: 'manual',
-        status: 'pending',
-        shares: 0,
-        amount: amountDelta,
-        price: 0,
-        occurredAt: new Date().toISOString(),
-      });
-      setOperationAmount('');
-      return;
-    }
-
-    const price = currentQuote?.price ?? 0;
-    if (!Number.isFinite(price) || price <= 0) {
-      alert('暂无成交价');
-      return;
-    }
-
-    const sharesDelta = amountDelta / price;
-    if (!Number.isFinite(sharesDelta) || sharesDelta <= 0) {
-      alert('暂无成交价');
-      return;
-    }
-
-    let nextShares = editingHolding.shares;
-    let nextCostAmount = editingHolding.costAmount;
-
-    if (operationType === 'sell') {
-      if (sharesDelta > editingHolding.shares) {
-        alert('份额不足');
-        return;
+    let plan: Omit<AssetRecurringPlan, 'id' | 'createdAt' | 'updatedAt'> | null | undefined;
+    if (editingHolding?.assetType === 'fund') {
+      if (deletePlan) plan = null;
+      else if (editingRecurringPlan || recurringEnabled || recurringAmount.trim()) {
+        const amount = Number(recurringAmount);
+        if (!Number.isFinite(amount) || amount <= 0) { alert('请输入定投金额'); return; }
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(recurringNextDate) || Number.isNaN(Date.parse(recurringNextDate))) {
+          alert('请选择下次定投日期'); return;
+        }
+        plan = { holdingId: editingId, amount, frequency: recurringFrequency,
+          startDate: editingRecurringPlan?.startDate ?? recurringNextDate,
+          nextDueDate: recurringNextDate, enabled: recurringEnabled };
       }
-      const averageCost = editingHolding.shares > 0 ? editingHolding.costAmount / editingHolding.shares : 0;
-      nextShares = editingHolding.shares - sharesDelta;
-      nextCostAmount = nextShares <= 0 ? 0 : Math.max(0, editingHolding.costAmount - averageCost * sharesDelta);
-    } else {
-      nextShares = editingHolding.shares + sharesDelta;
-      nextCostAmount = editingHolding.costAmount + amountDelta;
     }
-
-    const completedPayload = {
-      ...nextPayload,
-      name: currentQuote?.name || editingHolding.name,
-      currency: getAssetCurrency(editingHolding),
-      shares: nextShares,
-      costAmount: nextCostAmount,
-    };
-
-    await onUpdateAssetHolding(editingHolding.id, completedPayload, {
-      holdingId: editingHolding.id,
-      assetType: editingHolding.assetType,
-      code: editingHolding.code,
-      name: currentQuote?.name || editingHolding.name,
-      currency: getAssetCurrency(editingHolding),
-      tradeType: operationType,
-      source: 'manual',
-      status: 'completed',
-      shares: sharesDelta,
-      amount: amountDelta,
-      price,
-      priceSource: currentQuote?.priceSource ?? 'manual',
-      occurredAt: new Date().toISOString(),
-      settledAt: new Date().toISOString(),
-    });
-    setForm((previous) => ({
-      ...previous,
-      shares: String(Number(nextShares.toFixed(4))),
-      costAmount: String(Number(nextCostAmount.toFixed(2))),
-      averageCost: '',
-    }));
-    setOperationAmount('');
+    let trade: Omit<AssetTradeRecord, 'id' | 'createdAt'> | undefined;
+    if (editingHolding && operationValue.trim()) {
+      const value = Number(operationValue);
+      if (!Number.isFinite(value) || value <= 0) { alert(operationUnit === 'shares' ? '请输入份额' : '请输入金额'); return; }
+      const quote = positions.find(position => position.holding.id === editingId)?.quote;
+      const delayed = isDelayedSettlementFund({ ...editingHolding, name: quote?.name || editingHolding.name });
+      const price = quote?.price ?? 0;
+      const amount = operationUnit === 'shares' ? (delayed ? 0 : value * price) : value;
+      if (operationType === 'sell' && operationUnit === 'shares' && value > payload.shares) {
+        alert('份额不足'); return;
+      }
+      if (operationType === 'sell' && operationUnit === 'amount' && (!(price > 0) || amount > payload.shares * price)) {
+        alert(price > 0 ? '金额超出持仓' : '暂无成交价'); return;
+      }
+      const now = new Date().toISOString();
+      trade = { holdingId: editingId, assetType: payload.assetType, code: payload.code,
+        name: quote?.name || payload.name, currency: getAssetCurrency(editingHolding),
+        tradeType: operationType, source: 'manual', status: delayed ? 'pending' : 'completed',
+        inputMode: operationUnit, shares: operationUnit === 'shares' ? value : 0, amount, price: 0, occurredAt: now };
+      if (!delayed) {
+        if (!Number.isFinite(price) || price <= 0) { alert('暂无成交价'); return; }
+        let quantity: ReturnType<typeof resolveAssetTradeQuantity>;
+        try { quantity = resolveAssetTradeQuantity(operationUnit, value, price); }
+        catch (error) { alert(error instanceof Error ? error.message : '请检查交易数量'); return; }
+        const delta = quantity.shares;
+        const nextShares = operationType === 'sell' ? Math.max(0, payload.shares - delta) : payload.shares + delta;
+        const nextCost = operationType === 'sell'
+          ? (nextShares === 0 ? 0 : payload.costAmount * nextShares / payload.shares)
+          : payload.costAmount + amount;
+        payload = { ...payload, shares: nextShares, costAmount: nextCost };
+        trade = { ...trade, shares: delta, price, priceSource: quote?.priceSource ?? 'manual', settledAt: now };
+      }
+    }
+    savingRef.current = true;
+    setIsSaving(true);
+    try {
+      if (editingId) await onUpdateAssetHolding(editingId, payload, trade, plan);
+      else await onAddAssetHolding(payload);
+      closeForm();
+    } catch (error) {
+      alert(error instanceof Error ? error.message : '保存失败');
+    } finally {
+      savingRef.current = false;
+      setIsSaving(false);
+    }
   };
 
-  const saveRecurringPlan = async () => {
-    if (!editingHolding || editingHolding.assetType !== 'fund') {
-      return;
-    }
-    const amount = Number(recurringAmount || 0);
-    if (amount <= 0) {
-      alert('请输入定投金额');
-      return;
-    }
-    await onSaveAssetRecurringPlan(
-      {
-        holdingId: editingHolding.id,
-        amount,
-        frequency: recurringFrequency,
-        startDate: editingRecurringPlan?.startDate ?? recurringNextDate,
-        nextDueDate: recurringNextDate,
-        enabled: recurringEnabled,
-      },
-      editingRecurringPlan?.id,
-    );
+  const deleteAsset = async () => {
+    if (savingRef.current) return;
+    savingRef.current = true;
+    setIsSaving(true);
+    try { await onDeleteAssetHolding(editingId); closeForm(); }
+    catch (error) { alert(error instanceof Error ? error.message : '删除失败'); }
+    finally { savingRef.current = false; setIsSaving(false); }
   };
 
   const handleImageSelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -464,6 +451,41 @@ const Analysis: React.FC<AnalysisProps> = ({
         />
       </div>
 
+      <div className="rounded-2xl border border-border bg-surface p-5 space-y-4">
+        <div className="flex items-center justify-between gap-3">
+          <h3 className="text-base font-semibold text-primary">FIRE 进度</h3>
+          <span className="text-lg font-semibold tabular-nums text-primary">
+            {freedom.fireProgressPercent === null ? '暂无' : `${freedom.fireProgressPercent.toFixed(1)}%`}
+          </span>
+        </div>
+        <div
+          role="progressbar"
+          aria-label="FIRE 进度"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={freedom.fireProgressPercent === null ? undefined : Math.min(100, freedom.fireProgressPercent)}
+          aria-valuetext={freedom.fireProgressPercent === null ? '暂无日均支出' : `${freedom.fireProgressPercent.toFixed(1)}%`}
+          className="h-2.5 overflow-hidden rounded-full bg-zinc-100"
+        >
+          <div
+            className="h-full rounded-full bg-primary transition-[width] duration-500 motion-reduce:transition-none"
+            style={{ width: `${Math.min(100, freedom.fireProgressPercent ?? 0)}%` }}
+          />
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="min-w-0">
+            <p className="text-xs text-secondary">现有资产</p>
+            <p className="mt-1 text-sm font-semibold tabular-nums text-primary break-all">{formatAssetMoney(summary.totalMarketValue, 'CNY')}</p>
+          </div>
+          <div className="min-w-0 text-right">
+            <p className="text-xs text-secondary">目标资产</p>
+            <p className="mt-1 text-sm font-semibold tabular-nums text-primary break-all">
+              {freedom.fireTargetAssets === null ? '暂无' : formatAssetMoney(freedom.fireTargetAssets, 'CNY')}
+            </p>
+          </div>
+        </div>
+      </div>
+
       <div className="grid grid-cols-4 gap-1 rounded-2xl border border-border bg-surface p-1">
         <AssetActionButton icon={Plus} label="添加资产" onClick={openAddForm} />
         <AssetActionButton icon={ReceiptText} label="交易记录" onClick={() => setIsTradeRecordsOpen(true)} />
@@ -522,10 +544,10 @@ const Analysis: React.FC<AnalysisProps> = ({
               <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 mb-3">
                 <div className="min-w-0">
                   <p className="line-clamp-2 text-[15px] font-semibold leading-5 text-primary">
-                    {position.quote?.name || position.holding.name || position.holding.code}
+                    {getAssetDisplayName(position.holding, position.quote)}
                   </p>
                   <p className="text-xs text-secondary mt-1">
-                    {formatAssetKind(position.holding)} · {position.holding.code}
+                    {formatAssetKind(position.holding)}{getAssetCurrency(position.holding) === 'USD' ? '' : ` · ${position.holding.code}`}
                   </p>
                 </div>
                 <div className="text-right whitespace-nowrap">
@@ -559,30 +581,43 @@ const Analysis: React.FC<AnalysisProps> = ({
         />
       )}
 
+      {confirmation && createPortal(
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-6" style={{ zIndex: 110 }}>
+          <div role="alertdialog" aria-modal="true" aria-labelledby="asset-confirm-title" className="w-full max-w-sm rounded-2xl bg-white p-6">
+            <h3 id="asset-confirm-title" className="text-lg font-semibold text-primary">{confirmation === 'delete' ? '删除资产？' : '放弃修改？'}</h3>
+            <p className="mt-3 text-sm text-secondary">{confirmation === 'delete'
+              ? `将删除「${editingHolding?.name || editingHolding?.code}」的持仓和定投计划，保留交易与收益历史。`
+              : '未保存的修改将丢失。'}</p>
+            <div className="grid grid-cols-2 gap-3 mt-6">
+              <button type="button" disabled={isSaving} onClick={() => setConfirmation(null)} className="h-11 rounded-xl border border-border">取消</button>
+              <button type="button" disabled={isSaving} onClick={() => confirmation === 'delete' ? void deleteAsset() : closeForm()} className="h-11 rounded-xl bg-primary text-white">{confirmation === 'delete' ? '删除' : '放弃修改'}</button>
+            </div>
+          </div>
+        </div>, document.body
+      )}
       {isFormOpen && createPortal(
-        <div className="fixed inset-0 bg-black/30 flex items-end justify-center" style={{ zIndex: 100 }}>
+        <div className="fixed inset-0 bg-black/30 flex items-end justify-center" style={{ zIndex: 100 }} onClick={event => { if (event.target === event.currentTarget) requestClose(); }}>
           <form
+            role="dialog"
+            aria-modal="true"
+            aria-label={editingId ? '编辑资产' : '添加资产'}
             onSubmit={submitForm}
             className="w-full max-w-2xl max-h-[calc(100dvh-4rem)] bg-white rounded-t-3xl flex flex-col overflow-hidden"
           >
             <div className="flex items-center justify-between px-6 pt-6 pb-4 border-b border-border">
               <h2 className="text-lg font-semibold text-primary">{editingId ? '编辑资产' : '添加资产'}</h2>
-              {editingId && (
-                <button
-                  type="button"
-                  onClick={async () => {
-                    await onDeleteAssetHolding(editingId);
-                    closeForm();
-                  }}
-                  className="text-danger"
-                  title="删除"
-                >
-                  <Trash2 className="w-5 h-5" />
-                </button>
-              )}
+              <button type="button" onClick={requestClose} disabled={isSaving} aria-label="关闭" className="w-11 h-11 -my-2 -mr-2 flex items-center justify-center text-secondary">
+                <X className="w-5 h-5" />
+              </button>
             </div>
 
-            <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+            <div inert={isSaving || !!confirmation} className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+              {editingHolding ? (
+                <div className="space-y-1">
+                  <p className="text-base font-semibold text-primary">{getAssetDisplayName(editingHolding, positions.find(position => position.holding.id === editingId)?.quote)}</p>
+                  <p className="text-xs text-secondary">{getAssetCurrency(editingHolding) === 'USD' ? '' : `${editingHolding.code} · `}{formatAssetKind(editingHolding)}</p>
+                </div>
+              ) : <>
               <div className="flex bg-surface p-1 rounded-xl border border-border">
                 {([
                   { value: 'fund', label: '基金' },
@@ -603,16 +638,13 @@ const Analysis: React.FC<AnalysisProps> = ({
               </div>
 
               <Field label="代码" value={form.code} onChange={(value) => setForm((previous) => ({ ...previous, code: value }))} inputMode={form.assetKind === 'us-stock' ? 'text' : 'numeric'} />
+              </>}
               <Field label="份额" value={form.shares} onChange={(value) => setForm((previous) => ({ ...previous, shares: value }))} inputMode="decimal" />
-              <div className="space-y-3">
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-xs text-secondary">成本（二选一）</span>
-                  <span className="text-xs text-zinc-400">总成本优先</span>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <Field label={`总成本（${form.assetKind === 'us-stock' ? '美元' : '人民币'}）`} value={form.costAmount} onChange={(value) => setForm((previous) => ({ ...previous, costAmount: value }))} inputMode="decimal" />
-                  <Field label={`平均成本（${form.assetKind === 'us-stock' ? '美元' : '人民币'}）`} value={form.averageCost} onChange={(value) => setForm((previous) => ({ ...previous, averageCost: value }))} inputMode="decimal" />
-                </div>
+              <div>
+                <SegmentedControl value={costMode} options={[{ value: 'total', label: '总成本' }, { value: 'average', label: '平均成本' }]} onChange={value => switchCostMode(value as 'total' | 'average')} />
+                <Field label={`${costMode === 'total' ? '总成本' : '平均成本'}（${form.assetKind === 'us-stock' ? '美元' : '人民币'}）`}
+                  value={costMode === 'total' ? form.costAmount : form.averageCost}
+                  onChange={value => setForm(previous => ({ ...previous, [costMode === 'total' ? 'costAmount' : 'averageCost']: value }))} inputMode="decimal" />
               </div>
 
               {editingHolding && (
@@ -634,26 +666,19 @@ const Analysis: React.FC<AnalysisProps> = ({
                       </button>
                     ))}
                   </div>
+                  <SegmentedControl value={operationUnit} options={[{ value: 'amount', label: '金额' }, { value: 'shares', label: '份额' }]}
+                    onChange={value => setOperationUnit(value as 'amount' | 'shares')} />
                   <Field
-                    label={`${operationType === 'sell' ? '减仓金额' : '加仓金额'}（${getAssetCurrency(editingHolding) === 'USD' ? '美元' : '人民币'}）`}
-                    value={operationAmount}
-                    onChange={setOperationAmount}
+                    label={`${operationType === 'sell' ? '减仓' : '加仓'}${operationUnit === 'shares' ? '份额' : `金额（${getAssetCurrency(editingHolding) === 'USD' ? '美元' : '人民币'}）`}`}
+                    value={operationValue}
+                    onChange={operationUnit === 'shares' ? setOperationShares : setOperationAmount}
                     inputMode="decimal"
                   />
-                  {isDelayedSettlementFund(editingHolding) && (
-                    <p className="text-xs text-secondary">QDII 待确认净值</p>
-                  )}
-                  <button
-                    type="button"
-                    onClick={applyAssetOperation}
-                    className="h-10 w-full rounded-xl bg-white border border-border text-sm font-semibold text-primary"
-                  >
-                    {operationType === 'sell' ? '确认减仓' : '确认加仓'}
-                  </button>
+
                 </div>
               )}
 
-              {editingHolding?.assetType === 'fund' && (
+              {editingHolding?.assetType === 'fund' && !deletePlan && (
                 <div className="rounded-2xl border border-border bg-surface/40 p-4 space-y-4">
                   <div className="flex items-center justify-between">
                     <h3 className="text-sm font-semibold text-primary">定投计划</h3>
@@ -694,36 +719,18 @@ const Analysis: React.FC<AnalysisProps> = ({
                       className="w-full h-12 rounded-xl border border-border px-4 text-primary outline-none focus:border-primary"
                     />
                   </label>
-                  <div className="grid grid-cols-2 gap-3">
-                    {editingRecurringPlan ? (
-                      <button
-                        type="button"
-                        onClick={() => onDeleteAssetRecurringPlan(editingRecurringPlan.id)}
-                        className="h-10 rounded-xl border border-border bg-white text-sm font-semibold text-danger"
-                      >
-                        删除计划
-                      </button>
-                    ) : (
-                      <div />
-                    )}
-                    <button
-                      type="button"
-                      onClick={saveRecurringPlan}
-                      className="h-10 rounded-xl bg-primary text-sm font-semibold text-white"
-                    >
-                      保存计划
-                    </button>
-                  </div>
+                  {editingRecurringPlan && <button type="button" onClick={() => setDeletePlan(true)} className="h-10 text-sm text-danger">删除计划</button>}
+
                 </div>
               )}
+              {deletePlan && <button type="button" onClick={() => setDeletePlan(false)} className="h-11 text-sm text-secondary">恢复定投计划</button>}
+              {editingHolding && <button type="button" onClick={() => setConfirmation('delete')} disabled={isSaving} className="w-full h-11 text-sm text-danger">删除资产</button>}
+
             </div>
 
-            <div className="grid grid-cols-2 gap-3 p-4 border-t border-border bg-white" style={{ paddingBottom: 'calc(1rem + env(safe-area-inset-bottom))' }}>
-              <button type="button" onClick={closeForm} className="h-11 rounded-xl border border-border text-primary font-semibold">
-                取消
-              </button>
-              <button type="submit" className="h-11 rounded-xl bg-primary text-white font-semibold">
-                保存
+            <div className="p-4 border-t border-border bg-white" style={{ paddingBottom: 'calc(1rem + env(safe-area-inset-bottom))' }}>
+              <button type="submit" disabled={isSaving} className="w-full h-11 rounded-xl bg-primary text-white font-semibold disabled:opacity-50">
+                {isSaving ? '保存中' : '保存'}
               </button>
             </div>
           </form>
@@ -826,9 +833,9 @@ const TradeRecordsPanel = ({ records, onClose }: { records: AssetTradeRecord[]; 
                     <p className="text-xs text-zinc-400 mt-1">{formatDateTime(record.occurredAt)}</p>
                   </div>
                   <div className="text-right flex-shrink-0">
-                    <p className="text-sm font-semibold text-primary">{formatAssetMoney(record.amount, getAssetCurrency(record))}</p>
+                    <p className="text-sm font-semibold text-primary">{record.status === 'pending' && record.inputMode === 'shares' ? '金额待确认' : formatAssetMoney(record.amount, getAssetCurrency(record))}</p>
                     <p className="text-xs text-secondary mt-1">
-                      {record.status === 'pending' ? '份额待确认' : `${record.shares.toFixed(4)}份`}
+                      {record.status === 'pending' && record.inputMode !== 'shares' ? '份额待确认' : `${record.shares.toFixed(4)}份`}
                     </p>
                   </div>
                 </div>
@@ -1309,30 +1316,42 @@ const HoldingDistribution = ({ title, distribution }: {
   title: string;
   distribution: ReturnType<typeof buildAssetHoldingDistribution>;
 }) => {
-  const pieData = distribution.map((item) => ({ ...item })) as Array<Record<string, string | number>>;
+  const [mode, setMode] = useState('merged');
+  const mergedDistribution = useMemo(() => mergeAssetHoldingDistribution(distribution), [distribution]);
+  const visibleDistribution = mode === 'merged' ? mergedDistribution : distribution;
+  const pieData = visibleDistribution.map((item) => ({ ...item })) as Array<Record<string, string | number>>;
   return (
     <section className="bg-white border border-border p-5 rounded-2xl">
       <h3 className="text-base font-semibold text-primary mb-4">{title}</h3>
+      <SegmentedControl
+        value={mode}
+        options={[{ value: 'merged', label: '合并' }, { value: 'holdings', label: '明细' }]}
+        onChange={setMode}
+      />
       {distribution.length > 0 ? (
-        <div className="grid grid-cols-[7rem,1fr] gap-4 items-center">
+        <div className="grid grid-cols-[7rem_1fr] gap-4 items-center">
           <div className="relative h-28">
             <ResponsiveContainer width="100%" height="100%">
               <RechartsPieChart>
                 <Pie data={pieData} dataKey="value" innerRadius={34} outerRadius={52} paddingAngle={2}>
-                  {distribution.map((item) => <Cell key={item.id} fill={item.color} />)}
+                  {visibleDistribution.map((item) => <Cell key={item.id} fill={item.color} />)}
                 </Pie>
+                <Tooltip formatter={(value: number) => formatAssetMoney(value, 'CNY')} contentStyle={{ borderRadius: '12px', border: '1px solid #e4e4e7', fontSize: '12px' }} />
               </RechartsPieChart>
             </ResponsiveContainer>
             <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-              <span className="text-lg font-semibold text-primary">{distribution.length}</span>
+              <span className="text-lg font-semibold text-primary">{visibleDistribution.length}</span>
               <span className="text-xs text-secondary">持仓</span>
             </div>
           </div>
-          <div className="space-y-3 min-w-0">
-            {distribution.slice(0, 5).map((item) => (
-              <div key={item.id} className="grid grid-cols-[0.5rem,1fr,auto] gap-2 items-center text-xs">
+          <div className="space-y-3 min-w-0 max-h-64 overflow-y-auto">
+            {visibleDistribution.map((item) => (
+              <div key={item.id} className="grid grid-cols-[0.5rem_1fr_auto] gap-2 items-center text-xs">
                 <span className="w-2 h-2 rounded-full" style={{ backgroundColor: item.color }} />
-                <span className="truncate text-primary">{item.name}</span>
+                <span className="text-primary min-w-0">
+                  <span className="block break-words">{item.name}</span>
+                  <span className="block mt-1 text-secondary tabular-nums">{formatAssetMoney(item.value, 'CNY')}</span>
+                </span>
                 <span className="text-secondary">{item.percent.toFixed(1)}%</span>
               </div>
             ))}

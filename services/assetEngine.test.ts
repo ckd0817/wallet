@@ -11,6 +11,7 @@ import {
   getUsdCnyRate,
   isLikelyMarketOpenForHolding,
   mergeAssetPerformanceHistory,
+  mergeAssetHoldingDistribution,
   normalizeAssetCode,
   normalizeAssetHolding,
   normalizeAssetImportCandidate,
@@ -520,6 +521,61 @@ describe('assetEngine', () => {
 
     expect(distribution[0]).toMatchObject({ name: 'A基金', value: 200 });
     expect(distribution[0].percent).toBeCloseTo(66.67, 2);
+  });
+});
+
+describe('mergeAssetHoldingDistribution', () => {
+  const position = (id: string, name: string, value: number, code = id, market: 'fund' | 'us' = 'fund') => ({
+    holding: { id, name, code, market, assetType: market === 'fund' ? 'fund' as const : 'stock' as const,
+      shares: 1, costAmount: value, createdAt: '', updatedAt: '' },
+    marketValue: value, profit: 0, profitRate: 0, dailyChangeAmount: 0,
+  });
+
+  it('合并纳指100基金与QQQ系列，保持总市值和原始明细', () => {
+    const distribution = buildAssetHoldingDistribution([
+      position('1', '天弘纳斯达克100指数(QDII)A', 200),
+      position('2', '南方纳斯达克100指数发起(QDII)C', 300),
+      position('3', 'Invesco QQQ', 100, 'QQQ', 'us'),
+      position('4', 'Invesco NASDAQ 100 ETF', 100, 'QQQM', 'us'),
+      position('5', '沪深300', 300),
+      position('6', '天弘纳斯达克100指数(QDII)A', 0),
+    ]);
+    const before = structuredClone(distribution);
+    const merged = mergeAssetHoldingDistribution(distribution);
+
+    expect(merged).toHaveLength(2);
+    expect(merged[0]).toMatchObject({ id: 'index:ndx', name: 'QQQ', value: 700, percent: 70 });
+    expect(merged[1]).toMatchObject({ name: '沪深300', value: 300, percent: 30 });
+    expect(distribution).toEqual(before);
+    expect(distribution).toHaveLength(5);
+  });
+
+  it('将以股票类型保存的场内纳指ETF富国合并到QQQ', () => {
+    const etf = position('etf', '纳指ETF富国', 200);
+    const distribution = buildAssetHoldingDistribution([
+      { ...etf, holding: { ...etf.holding, assetType: 'stock', market: 'sh', code: '513870' } },
+      position('qqq', 'Invesco QQQ', 300, 'QQQ', 'us'),
+    ]);
+    expect(mergeAssetHoldingDistribution(distribution)).toMatchObject([
+      { id: 'index:ndx', name: 'QQQ', value: 500, percent: 100 },
+    ]);
+    expect(distribution.find(item => item.id === 'etf')?.name).toBe('纳指ETF富国');
+  });
+
+  it('不合并其他纳斯达克指数和杠杆产品', () => {
+    const distribution = buildAssetHoldingDistribution([
+      position('1', '纳斯达克综合指数', 100),
+      position('2', '纳斯达克100两倍杠杆', 100),
+      position('3', '纳斯达克100科技指数', 100),
+      position('4', '纳斯达克100等权指数', 100),
+      position('5', 'ProShares UltraPro QQQ', 100, 'TQQQ', 'us'),
+      position('6', '纳指ETF联接', 100),
+    ]);
+    const merged = mergeAssetHoldingDistribution(distribution);
+    expect(merged).toHaveLength(6);
+    expect(merged.find(item => item.id === 'index:ndx')?.value).toBe(100);
+    expect(merged.reduce((sum, item) => sum + item.percent, 0)).toBeCloseTo(100);
+    expect(mergeAssetHoldingDistribution([])).toEqual([]);
   });
 });
 

@@ -5,6 +5,8 @@ export interface WealthFreedomResult {
   avgDailyExpense: number;
   periodDays: number;
   periodExpense: number;
+  fireTargetAssets: number | null;
+  fireProgressPercent: number | null;
 }
 
 const startOfLocalDay = (date: Date) =>
@@ -40,11 +42,14 @@ export const calculateWealthFreedom = (
     })
     .reduce((sum, transaction) => sum + transaction.amount, 0);
   const avgDailyExpense = periodExpense / periodDays;
+  const fireTargetAssets = avgDailyExpense > 0 ? avgDailyExpense * 30 * 12 * 25 : null;
 
   return {
     days: avgDailyExpense > 0 ? Math.max(0, totalAssets / avgDailyExpense) : null,
     avgDailyExpense,
     periodDays,
     periodExpense,
+    fireTargetAssets,
+    fireProgressPercent: fireTargetAssets === null ? null : Math.max(0, totalAssets / fireTargetAssets * 100),
   };
 };

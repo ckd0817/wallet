@@ -1,3 +1,4 @@
+import { resolveAssetTradeQuantity } from './services/assetTradeQuantity';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { LayoutDashboard, PieChart, Plus, BarChart3, Settings as SettingsIcon } from 'lucide-react';
 import { v4 as uuidv4 } from 'uuid';
@@ -29,6 +30,7 @@ import Stats from './components/Stats';
 import Analysis from './components/Analysis';
 import AddTransaction from './components/AddTransaction';
 import Settings from './components/Settings';
+import AppUpdate from './components/AppUpdate';
 import {
   addNativeCaptureListener,
   addNativeDeepLinkListener,
@@ -343,7 +345,7 @@ const App: React.FC = () => {
         .sort((left, right) => new Date(left.record.occurredAt).getTime() - new Date(right.record.occurredAt).getTime());
 
       for (const { record, index } of pendingTradeEntries) {
-        if (record.amount <= 0) {
+        if ((record.inputMode === 'shares' ? record.shares : record.amount) <= 0) {
           continue;
         }
 
@@ -366,7 +368,8 @@ const App: React.FC = () => {
 
         const settledAt = new Date().toISOString();
         const currentHolding = holdings[holdingIndex];
-        let settledShares = record.amount / confirmedPrice;
+        const settledQuantity = resolveAssetTradeQuantity(record.inputMode ?? 'amount', record.inputMode === 'shares' ? record.shares : record.amount, confirmedPrice);
+        let settledShares = settledQuantity.shares;
         let nextShares = currentHolding.shares;
         let nextCostAmount = currentHolding.costAmount;
 
@@ -384,7 +387,7 @@ const App: React.FC = () => {
           nextCostAmount = nextShares <= 0 ? 0 : Math.max(0, currentHolding.costAmount - averageCost * settledShares);
         } else {
           nextShares = currentHolding.shares + settledShares;
-          nextCostAmount = currentHolding.costAmount + record.amount;
+          nextCostAmount = currentHolding.costAmount + settledQuantity.amount;
         }
 
         holdings[holdingIndex] = {
@@ -399,6 +402,7 @@ const App: React.FC = () => {
           name: quote?.name || record.name,
           status: 'completed',
           shares: settledShares,
+          amount: record.inputMode === 'shares' ? settledShares * confirmedPrice : record.amount,
           price: confirmedPrice,
           priceSource: 'confirmed',
           settledAt,
@@ -1070,6 +1074,7 @@ const App: React.FC = () => {
     id: string,
     data: Omit<AssetHolding, 'id' | 'createdAt' | 'updatedAt'>,
     tradeRecord?: Omit<AssetTradeRecord, 'id' | 'createdAt'>,
+    recurringPlan?: Omit<AssetRecurringPlan, 'id' | 'createdAt' | 'updatedAt'> | null,
   ) => {
     const original = assetHoldings.find((holding) => holding.id === id);
     if (!original) {
@@ -1089,38 +1094,24 @@ const App: React.FC = () => {
         }
       : null;
 
-    if (runningInAndroid) {
-      if (nextTradeRecord) {
-        const nextSnapshot = normalizeSnapshot({
-          ...buildCurrentSnapshot(),
-          assetHoldings: assetHoldings.map((holding) => (holding.id === id ? assetHolding : holding)),
-          assetTradeRecords: [nextTradeRecord, ...assetTradeRecords],
-        });
-        applySnapshot(await saveNativeSnapshot(nextSnapshot));
-        void syncAssetQuotesForSnapshot(nextSnapshot.assetHoldings, nextSnapshot);
-        return;
-      }
-
-      const nextSnapshot = await saveNativeAssetHolding(assetHolding);
-      applySnapshot(nextSnapshot);
-      void syncAssetQuotesForSnapshot(nextSnapshot.assetHoldings, nextSnapshot);
-      return;
-    }
-
+    const existingPlan = assetRecurringPlans.find(plan => plan.holdingId === id);
+    const nextPlan: AssetRecurringPlan | null = recurringPlan ? {
+      ...recurringPlan, id: existingPlan?.id ?? uuidv4(),
+      createdAt: existingPlan?.createdAt ?? new Date().toISOString(), updatedAt: new Date().toISOString(),
+    } : null;
     const nextSnapshot = normalizeSnapshot({
       ...buildCurrentSnapshot(),
-      assetHoldings: assetHoldings.map((holding) => (holding.id === id ? assetHolding : holding)),
+      assetHoldings: assetHoldings.map(holding => holding.id === id ? assetHolding : holding),
       assetTradeRecords: nextTradeRecord ? [nextTradeRecord, ...assetTradeRecords] : assetTradeRecords,
+      assetRecurringPlans: recurringPlan === undefined ? assetRecurringPlans
+        : [...assetRecurringPlans.filter(plan => plan.holdingId !== id), ...(nextPlan ? [nextPlan] : [])],
     });
-    applySnapshot(nextSnapshot);
-    void syncAssetQuotesForSnapshot(nextSnapshot.assetHoldings, nextSnapshot);
+    const savedSnapshot = runningInAndroid ? await saveNativeSnapshot(nextSnapshot) : nextSnapshot;
+    applySnapshot(savedSnapshot);
+    void syncAssetQuotesForSnapshot(savedSnapshot.assetHoldings, savedSnapshot);
   };
 
   const handleDeleteAssetHolding = async (id: string) => {
-    if (!window.confirm('确认删除？')) {
-      return;
-    }
-
     if (runningInAndroid) {
       applySnapshot(await deleteNativeAssetHolding(id));
       return;
@@ -1319,6 +1310,7 @@ const App: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-background text-primary font-sans relative">
+      <AppUpdate />
       <header className="sticky top-0 z-30 bg-background/80 backdrop-blur-xl border-b border-border px-6 h-16 flex items-center justify-between transition-all">
         <h1 className="text-2xl font-bold tracking-tight text-primary">{getHeaderTitle()}</h1>
       </header>

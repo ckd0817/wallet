@@ -10,6 +10,7 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(WalletDataPlugin.class);
         registerPlugin(CloudSyncPlugin.class);
+        registerPlugin(AppUpdatePlugin.class);
         registerPlugin(ScreenCaptureBookkeepingPlugin.class);
         super.onCreate(savedInstanceState);
         ScreenCaptureBookkeepingPlugin.handleIncomingIntent(getIntent());

@@ -41,6 +41,7 @@ import { buildBackupPayload, parseBackupFile } from '../services/dataBackup';
 import { DEFAULT_CAPTURE_PROMPT, isNativeIgnoringBatteryOptimizations, requestNativeIgnoreBatteryOptimization } from '../services/walletStore';
 import { getRetryableCaptureLogIds } from './captureLogRetry';
 import CloudAccount from './CloudAccount';
+import { requestUpdateCheck } from '../services/appUpdate';
 
 const FUND_QUOTE_SOURCES: Array<{
   id: FundQuoteSourceOption;
@@ -396,6 +397,10 @@ const Settings: React.FC<SettingsProps> = ({
   return (
     <div className="flex flex-col h-full space-y-8 animate-slide-up pb-32">
       {isAndroidNative && <CloudAccount />}
+      {isAndroidNative && <button type="button" onClick={requestUpdateCheck} className="flex w-full items-center justify-between rounded-2xl border border-border bg-white p-5 text-left">
+        <span className="text-base font-semibold text-primary">检查更新</span>
+        <ChevronRight className="h-5 w-5 text-secondary" />
+      </button>}
       <section>
         <SectionHeader title="截图自动记账" />
 

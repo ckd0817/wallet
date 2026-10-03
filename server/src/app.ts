@@ -8,11 +8,13 @@ import { vault,token,hash } from './crypto.js';
 import { pushSchema,validateBackup,HttpError } from './protocol.js';
 import { Wallet } from './sync.js';
 import { createUsdCnyRateProvider } from './exchangeRate.js';
+import { registerAppUpdates } from './appUpdates.js';
 
 const credentials=z.object({username:z.string().trim().min(3).max(40).regex(/^[a-zA-Z0-9_\-\u4e00-\u9fff]+$/).transform(v=>v.toLowerCase()),
   password:z.string().min(8).max(128)}).strict();
 export function buildApp(pool:pg.Pool,masterKey:string) {
   const app=Fastify({bodyLimit:20*1024*1024,logger:false});
+  registerAppUpdates(app);
   const secrets=vault(masterKey);
   const getUsdCnyRate=createUsdCnyRateProvider();
   async function authenticate(header:string|undefined) {

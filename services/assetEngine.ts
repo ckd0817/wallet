@@ -36,6 +36,8 @@ export interface AssetHoldingDistributionItem {
   value: number;
   percent: number;
   color: string;
+  groupId?: string;
+  groupName?: string;
 }
 
 export interface AssetRecurringExecution {
@@ -673,6 +675,28 @@ export const mergeAssetPerformanceHistory = (
     .slice(-maxDays);
 };
 
+export const getAssetDisplayName = (
+  holding: Pick<AssetHolding, 'code' | 'market' | 'currency' | 'name'>,
+  quote?: Pick<AssetQuote, 'name'>,
+) => getAssetCurrency(holding) === 'USD'
+  ? normalizeAssetCode(holding.code, 'us')
+  : quote?.name || holding.name || holding.code;
+
+const getDistributionGroup = (position: AssetPositionView) => {
+  const { holding, quote } = position;
+  const code = normalizeAssetCode(holding.code, holding.market);
+  const name = quote?.name || holding.name || '';
+  const isFundOrDomesticEtf = holding.assetType === 'fund'
+    || ((holding.market === 'sh' || holding.market === 'sz') && /ETF/i.test(name));
+  const isNasdaq100Fund = isFundOrDomesticEtf
+    && /纳斯达克\s*100(?!\d)|纳指\s*100(?!\d)|nasdaq[\s-]*100(?!\d)|纳指\s*ETF/i.test(name)
+    && !/杠杆|反向|做空|两倍|三倍|2倍|3倍|科技|等权|增强|备兑|leveraged|inverse|[23]x|technology|equal.weight|covered.call/i.test(name);
+  if (isNasdaq100Fund || (holding.market === 'us' && /^(QQQ|QQQM)$/.test(code))) {
+    return { groupId: 'index:ndx', groupName: 'QQQ' };
+  }
+  return {};
+};
+
 export const buildAssetHoldingDistribution = (positions: AssetPositionView[]): AssetHoldingDistributionItem[] => {
   const total = positions.reduce((sum, position) => sum + position.marketValue, 0);
   if (total <= 0) {
@@ -684,9 +708,31 @@ export const buildAssetHoldingDistribution = (positions: AssetPositionView[]): A
     .sort((left, right) => right.marketValue - left.marketValue)
     .map((position, index) => ({
       id: position.holding.id,
-      name: position.quote?.name || position.holding.name || position.holding.code,
+      name: getAssetDisplayName(position.holding, position.quote),
       value: position.marketValue,
       percent: (position.marketValue / total) * 100,
+      color: DISTRIBUTION_COLORS[index % DISTRIBUTION_COLORS.length],
+      ...getDistributionGroup(position),
+    }));
+};
+
+export const mergeAssetHoldingDistribution = (distribution: AssetHoldingDistributionItem[]): AssetHoldingDistributionItem[] => {
+  const groups = new Map<string, AssetHoldingDistributionItem>();
+  for (const item of distribution) {
+    const id = item.groupId ?? item.id;
+    const existing = groups.get(id);
+    if (existing) {
+      existing.value += item.value;
+    } else {
+      groups.set(id, { ...item, id, name: item.groupName ?? item.name });
+    }
+  }
+  const total = distribution.reduce((sum, item) => sum + item.value, 0);
+  return Array.from(groups.values())
+    .sort((left, right) => right.value - left.value)
+    .map((item, index) => ({
+      ...item,
+      percent: total > 0 ? item.value / total * 100 : 0,
       color: DISTRIBUTION_COLORS[index % DISTRIBUTION_COLORS.length],
     }));
 };

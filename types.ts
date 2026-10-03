@@ -159,6 +159,7 @@ export interface AssetTradeRecord {
   source: AssetTradeSource;
   status?: AssetTradeStatus;
   recurringPlanId?: string;
+  inputMode?: 'amount' | 'shares';
   shares: number;
   amount: number;
   price: number;
