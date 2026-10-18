@@ -35,7 +35,7 @@
 - 发布前递增 `android\app\build.gradle` 的 `versionCode` 并更新 `versionName`，不得覆盖已发布的版本号。
 - 更新服务地址：`https://152.32.147.55:8443/api/v1/app-updates/android`。
 - 服务端版本清单与安装包保存在仓库外 `/var/lib/wallet/releases`，沿用本机固定 Debug 签名。
-- 更新下载后校验 SHA-256、包名、版本号、可调试状态和当前应用签名，由 Android 系统确认覆盖安装。
+- 更新下载后只校验大小和 SHA-256，签名兼容性由 Android 系统安装程序判断。
 
 ## 数据迁移与云端
 

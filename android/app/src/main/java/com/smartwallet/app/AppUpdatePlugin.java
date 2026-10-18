@@ -2,9 +2,7 @@ package com.smartwallet.app;
 
 import android.content.Intent;
 import android.content.pm.PackageInfo;
-import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
-import android.content.pm.Signature;
 import android.net.Uri;
 import android.provider.Settings;
 import androidx.core.content.FileProvider;
@@ -19,8 +17,6 @@ import java.io.*;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.security.MessageDigest;
-import java.util.HashSet;
-import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -33,7 +29,7 @@ public final class AppUpdatePlugin extends Plugin {
     private static final long MAX_APK_SIZE = 200L * 1024 * 1024;
 
     private PackageInfo installed() throws Exception {
-        return getContext().getPackageManager().getPackageInfo(getContext().getPackageName(), PackageManager.GET_SIGNING_CERTIFICATES);
+        return getContext().getPackageManager().getPackageInfo(getContext().getPackageName(), 0);
     }
 
     private HttpURLConnection connect(String path) throws Exception {
@@ -131,14 +127,6 @@ public final class AppUpdatePlugin extends Plugin {
         });
     }
 
-    private static Set<String> signers(PackageInfo info) throws Exception {
-        if (info.signingInfo == null) throw new IOException("安装包签名无效");
-        Set<String> result = new HashSet<>();
-        for (Signature signature : info.signingInfo.getApkContentsSigners()) result.add(signature.toCharsString());
-        if (result.isEmpty()) throw new IOException("安装包签名无效");
-        return result;
-    }
-
     private void verify(File apk, JSONObject target) throws Exception {
         if (apk.length() != target.getLong("size")) throw new IOException("安装包不完整，请重新下载");
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
@@ -149,14 +137,6 @@ public final class AppUpdatePlugin extends Plugin {
         StringBuilder hex = new StringBuilder();
         for (byte value : digest.digest()) hex.append(String.format("%02x", value & 255));
         if (!hex.toString().equals(target.getString("sha256"))) throw new IOException("安装包校验失败，请重新下载");
-        PackageInfo archive = getContext().getPackageManager().getPackageArchiveInfo(apk.getPath(), PackageManager.GET_SIGNING_CERTIFICATES);
-        PackageInfo current = installed();
-        if (archive == null || !getContext().getPackageName().equals(archive.packageName)
-            || archive.applicationInfo == null || (archive.applicationInfo.flags & ApplicationInfo.FLAG_DEBUGGABLE) == 0
-            || archive.getLongVersionCode() != target.getLong("versionCode")
-            || archive.getLongVersionCode() <= current.getLongVersionCode()
-            || !target.getString("versionName").equals(archive.versionName)
-            || !signers(archive).equals(signers(current))) throw new IOException("安装包与当前应用不兼容");
     }
 
     @PluginMethod public void installUpdate(PluginCall call) {
