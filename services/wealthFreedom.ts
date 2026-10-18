@@ -42,7 +42,7 @@ export const calculateWealthFreedom = (
     })
     .reduce((sum, transaction) => sum + transaction.amount, 0);
   const avgDailyExpense = periodExpense / periodDays;
-  const fireTargetAssets = avgDailyExpense > 0 ? avgDailyExpense * 30 * 12 * 25 : null;
+  const fireTargetAssets = avgDailyExpense > 0 ? avgDailyExpense * 30 * 12 / 0.02 : null;
 
   return {
     days: avgDailyExpense > 0 ? Math.max(0, totalAssets / avgDailyExpense) : null,

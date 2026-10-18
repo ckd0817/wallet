@@ -36,15 +36,15 @@ describe('calculateWealthFreedom', () => {
     expect(result.fireProgressPercent).toBeNull();
   });
 
-  it('按日均支出计算 FIRE 目标并保留超额进度', () => {
+  it('按 2% 提取率计算 FIRE 目标并保留超额进度', () => {
     const transactions = [expense(3_000, '2026-07-01')];
     const now = new Date(2026, 6, 19, 12);
     const result = calculateWealthFreedom(450_000, transactions, 1, now);
 
     expect(result.avgDailyExpense).toBe(100);
-    expect(result.fireTargetAssets).toBe(900_000);
-    expect(result.fireProgressPercent).toBe(50);
-    expect(calculateWealthFreedom(1_350_000, transactions, 1, now).fireProgressPercent).toBe(150);
+    expect(result.fireTargetAssets).toBe(1_800_000);
+    expect(result.fireProgressPercent).toBe(25);
+    expect(calculateWealthFreedom(2_700_000, transactions, 1, now).fireProgressPercent).toBe(150);
     expect(calculateWealthFreedom(0, transactions, 1, now).fireProgressPercent).toBe(0);
     expect(calculateWealthFreedom(-100, transactions, 1, now).fireProgressPercent).toBe(0);
   });
