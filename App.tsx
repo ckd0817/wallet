@@ -47,6 +47,8 @@ import {
   loadWebSnapshot,
   normalizeSnapshot,
   openNativeAccessibilitySettings,
+  setNativePaymentAutoCapture,
+  removeNativeRememberedPage,
   saveNativeCategory,
   saveNativeLlmConfig,
   saveNativeRecurringProfile,
@@ -963,6 +965,30 @@ const App: React.FC = () => {
     }));
   };
 
+  const handleTogglePaymentAutoCapture = async (enabled: boolean) => {
+    if (!runningInAndroid) {
+      return;
+    }
+
+    const status = await setNativePaymentAutoCapture(enabled);
+    setAutoBookkeepingSettings((previous) => ({
+      ...previous,
+      ...status,
+    }));
+  };
+
+  const handleRemoveRememberedPage = async (key: string) => {
+    if (!runningInAndroid) {
+      return;
+    }
+
+    const status = await removeNativeRememberedPage(key);
+    setAutoBookkeepingSettings((previous) => ({
+      ...previous,
+      ...status,
+    }));
+  };
+
   const handleTestModelConfig = async (): Promise<LLMConfigTestResult> => testNativeModelConfig();
 
   const handleRetryCaptureLog = async (logId: string) => {
@@ -1269,6 +1295,8 @@ const App: React.FC = () => {
             onImport={handleImportBackup}
             onDeleteRecurring={handleDeleteRecurring}
             onOpenAccessibilitySettings={handleOpenAccessibilitySettings}
+            onTogglePaymentAutoCapture={handleTogglePaymentAutoCapture}
+            onRemoveRememberedPage={handleRemoveRememberedPage}
             onTestModelConfig={handleTestModelConfig}
             onRefreshAutoBookkeepingStatus={refreshAutoBookkeepingStatus}
             onRetryCaptureLog={handleRetryCaptureLog}

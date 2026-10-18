@@ -34,8 +34,9 @@ public final class CaptureProcessingEngine {
         timestampFormatter.setTimeZone(TimeZone.getTimeZone("UTC"));
     }
 
-    public void processCapture(byte[] pngBytes) {
-        processCaptureBytes(pngBytes, saveCaptureImage(pngBytes));
+    /** @return 入账的交易，识别失败返回 null */
+    public JSONObject processCapture(byte[] pngBytes) {
+        return processCaptureBytes(pngBytes, saveCaptureImage(pngBytes));
     }
 
     public void retrySavedCapture(String imagePath, File imageFile) {
@@ -60,7 +61,7 @@ public final class CaptureProcessingEngine {
         updateError(failureReason == null || failureReason.isEmpty() ? "截图失败" : failureReason);
     }
 
-    private void processCaptureBytes(byte[] pngBytes, String imagePath) {
+    private JSONObject processCaptureBytes(byte[] pngBytes, String imagePath) {
         captureAccount.set(WalletRepository.getInstance(appContext));
         JSONObject captureLog = null;
         try {
@@ -73,7 +74,7 @@ public final class CaptureProcessingEngine {
             if (!outcome.isSupported()) {
                 repository().upsertCaptureLog(captureLogFactory.createCompletedLog(captureLog, outcome, null));
                 updateError(outcome.getFailureReason().isEmpty() ? "截图分析失败" : outcome.getFailureReason());
-                return;
+                return null;
             }
 
             CaptureAnalysisResult result = outcome.getResult();
@@ -86,12 +87,14 @@ public final class CaptureProcessingEngine {
                 ScreenCaptureBookkeepingPlugin.emitCaptureRecorded(transaction);
                 emitStatus();
             }
+            return transaction;
         } catch (Exception exception) {
             Log.e(TAG, "Capture analysis failed", exception);
             if (captureLog != null) {
                 repository().upsertCaptureLog(captureLogFactory.createUnexpectedFailureLog(captureLog, resolveExceptionMessage(exception)));
             }
             updateError(resolveExceptionMessage(exception));
+            return null;
         } finally {
             captureAccount.remove();
         }

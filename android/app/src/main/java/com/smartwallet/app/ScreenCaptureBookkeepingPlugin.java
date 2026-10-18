@@ -15,6 +15,7 @@ import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.annotation.Permission;
 import com.smartwallet.app.accessibility.AccessibilityCaptureService;
+import com.smartwallet.app.accessibility.RememberedPageStore;
 import com.smartwallet.app.data.WalletRepository;
 import com.smartwallet.app.screencapture.CaptureAnalysisClient;
 import com.smartwallet.app.screencapture.CaptureProcessingEngine;
@@ -70,6 +71,25 @@ public class ScreenCaptureBookkeepingPlugin extends Plugin {
         Intent intent = new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS);
         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         getContext().startActivity(intent);
+        call.resolve(buildStatus());
+    }
+
+    @PluginMethod
+    public void setPaymentAutoCapture(PluginCall call) {
+        boolean enabled = Boolean.TRUE.equals(call.getBoolean("enabled", true));
+        JSONObject updates = new JSONObject();
+        safePut(updates, AccessibilityCaptureService.SETTING_PAYMENT_AUTO_CAPTURE, enabled);
+        repository().saveAutoBookkeepingSettings(updates);
+        AccessibilityCaptureService.setPaymentAutoCaptureEnabled(enabled);
+        call.resolve(buildStatus());
+    }
+
+    @PluginMethod
+    public void removeRememberedPage(PluginCall call) {
+        String key = call.getString("key", "");
+        if (key != null && !key.isEmpty()) {
+            RememberedPageStore.remove(getContext(), key);
+        }
         call.resolve(buildStatus());
     }
 
@@ -225,7 +245,8 @@ public class ScreenCaptureBookkeepingPlugin extends Plugin {
         );
 
         if (shouldPersist) {
-            settings = repository().saveAutoBookkeepingSettings(updates);
+            repository().saveAutoBookkeepingSettings(updates);
+            settings = repository().getAutoBookkeepingSettings();
         }
 
         return toJsObject(settings);

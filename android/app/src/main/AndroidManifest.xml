@@ -8,6 +8,21 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
+    <!-- 识别前台应用名称、Activity，并排除桌面与输入法 -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.HOME" />
+        </intent>
+        <intent>
+            <action android:name="android.view.InputMethod" />
+        </intent>
+    </queries>
+
     <application
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
@@ -45,7 +60,7 @@
         </activity>
 
         <service
-            android:name=".accessibility.AccessibilityCaptureService"
+            android:name="com.google.android.accessibility.selecttospeak.SelectToSpeakService"
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="specialUse"

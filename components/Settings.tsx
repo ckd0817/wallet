@@ -75,6 +75,8 @@ interface SettingsProps {
   onUpdateAppSettings: (settings: AppSettings) => Promise<void> | void;
   onTestFundQuoteSource: (source: FundQuoteSourceOption) => Promise<FundQuoteSourceTestResult>;
   onOpenAccessibilitySettings: () => Promise<void> | void;
+  onTogglePaymentAutoCapture: (enabled: boolean) => Promise<void> | void;
+  onRemoveRememberedPage: (key: string) => Promise<void> | void;
   onTestModelConfig: () => Promise<LLMConfigTestResult> | LLMConfigTestResult;
   onRefreshAutoBookkeepingStatus: () => Promise<void> | void;
   onRetryCaptureLog: (logId: string) => Promise<void> | void;
@@ -98,6 +100,8 @@ const Settings: React.FC<SettingsProps> = ({
   onUpdateAppSettings,
   onTestFundQuoteSource,
   onOpenAccessibilitySettings,
+  onTogglePaymentAutoCapture,
+  onRemoveRememberedPage,
   onTestModelConfig,
   onRefreshAutoBookkeepingStatus,
   onRetryCaptureLog,
@@ -112,6 +116,9 @@ const Settings: React.FC<SettingsProps> = ({
   const [importMode, setImportMode] = useState<'append' | 'overwrite'>('append');
   const [isRefreshingStatus, setIsRefreshingStatus] = useState(false);
   const [isOpeningAccessibilitySettings, setIsOpeningAccessibilitySettings] = useState(false);
+  const [isUpdatingPaymentAutoCapture, setIsUpdatingPaymentAutoCapture] = useState(false);
+  const [removingPageKeys, setRemovingPageKeys] = useState<Record<string, boolean>>({});
+  const rememberedPages = autoBookkeepingSettings.rememberedPages ?? [];
   const [isTestingModel, setIsTestingModel] = useState(false);
   const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
   const [modelTestResult, setModelTestResult] = useState<LLMConfigTestResult | null>(null);
@@ -319,6 +326,28 @@ const Settings: React.FC<SettingsProps> = ({
     }
   };
 
+  const handleTogglePaymentAutoCapture = async () => {
+    setIsUpdatingPaymentAutoCapture(true);
+    try {
+      await onTogglePaymentAutoCapture(!autoBookkeepingSettings.paymentAutoCapture);
+    } finally {
+      setIsUpdatingPaymentAutoCapture(false);
+    }
+  };
+
+  const handleRemoveRememberedPage = async (key: string) => {
+    setRemovingPageKeys((current) => ({ ...current, [key]: true }));
+    try {
+      await onRemoveRememberedPage(key);
+    } finally {
+      setRemovingPageKeys((current) => {
+        const nextState = { ...current };
+        delete nextState[key];
+        return nextState;
+      });
+    }
+  };
+
   const handleTestModel = async () => {
     setIsTestingModel(true);
     setModelTestResult(null);
@@ -419,6 +448,56 @@ const Settings: React.FC<SettingsProps> = ({
                 <div className="mt-4 rounded-2xl border border-amber-100 bg-amber-50 px-4 py-3 text-sm text-amber-800">
                   最近错误：{autoBookkeepingSettings.lastError}
                 </div>
+              )}
+
+              <div className="mt-4 flex items-center justify-between gap-3 rounded-3xl border border-border bg-surface/40 px-4 py-3">
+                <div className="min-w-0">
+                  <p id="payment-auto-capture-label" className="text-sm font-semibold text-primary">自动识别</p>
+                  <p className="mt-0.5 text-xs text-secondary">
+                    支付完成页{rememberedPages.length > 0 ? ` · 已记住 ${rememberedPages.length} 个页面` : ''}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={autoBookkeepingSettings.paymentAutoCapture}
+                  aria-labelledby="payment-auto-capture-label"
+                  onClick={handleTogglePaymentAutoCapture}
+                  disabled={isUpdatingPaymentAutoCapture || !isAndroidNative}
+                  className={`relative inline-flex h-7 w-12 flex-shrink-0 items-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                    autoBookkeepingSettings.paymentAutoCapture ? 'bg-primary' : 'bg-zinc-200'
+                  }`}
+                >
+                  <span
+                    className={`inline-block h-5 w-5 rounded-full bg-white shadow transition-transform ${
+                      autoBookkeepingSettings.paymentAutoCapture ? 'translate-x-6' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+              </div>
+
+              {rememberedPages.length > 0 && (
+                <ul className="mt-3 divide-y divide-zinc-100 rounded-3xl border border-border bg-white">
+                  {rememberedPages.map((page) => (
+                    <li key={page.key} className="flex items-center justify-between gap-3 px-4 py-3">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium text-primary">{page.appLabel}</p>
+                        {page.activityName && (
+                          <p className="truncate text-xs text-secondary">{page.activityName.split('.').pop()}</p>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveRememberedPage(page.key)}
+                        disabled={Boolean(removingPageKeys[page.key])}
+                        aria-label={`移除 ${page.appLabel}`}
+                        className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-2xl text-secondary transition-colors hover:bg-zinc-100 hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
               )}
 
               <div className="mt-5 grid grid-cols-2 gap-3">

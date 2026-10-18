@@ -19,6 +19,7 @@ import {
   LLMConfig,
   LLMConfigTestResult,
   RecurringProfile,
+  RememberedCapturePage,
   Transaction,
   WalletSnapshot,
 } from '../types';
@@ -78,6 +79,8 @@ interface ScreenCaptureBookkeepingPlugin {
   getStatus(): Promise<AutoBookkeepingSettings>;
   openAccessibilitySettings(): Promise<AutoBookkeepingSettings>;
   captureNow(): Promise<AutoBookkeepingSettings>;
+  setPaymentAutoCapture(options: { enabled: boolean }): Promise<AutoBookkeepingSettings>;
+  removeRememberedPage(options: { key: string }): Promise<AutoBookkeepingSettings>;
   retryCaptureLog(options: { logId: string }): Promise<AutoBookkeepingSettings>;
   testModelConfig(): Promise<LLMConfigTestResult>;
   consumePendingDeepLink(): Promise<{ url?: string }>;
@@ -171,7 +174,23 @@ export const defaultAutoBookkeepingSettings = (): AutoBookkeepingSettings => ({
   notificationPermissionGranted: false,
   lastCaptureAt: 0,
   lastError: '',
+  paymentAutoCapture: true,
+  rememberedPages: [],
 });
+
+const normalizeRememberedPages = (pages: unknown): RememberedCapturePage[] =>
+  Array.isArray(pages)
+    ? pages
+        .filter((page): page is Record<string, unknown> => Boolean(page) && typeof page === 'object')
+        .filter((page) => typeof page.key === 'string' && page.key !== '' && typeof page.packageName === 'string')
+        .map((page) => ({
+          key: page.key as string,
+          packageName: page.packageName as string,
+          activityName: typeof page.activityName === 'string' ? page.activityName : '',
+          appLabel: typeof page.appLabel === 'string' && page.appLabel ? page.appLabel : (page.packageName as string),
+          addedAt: typeof page.addedAt === 'number' ? page.addedAt : 0,
+        }))
+    : [];
 
 export const defaultAppSettings = (): AppSettings => ({
   expenseAverageMonths: 1,
@@ -322,6 +341,9 @@ const normalizeAutoBookkeepingSettings = (
         : defaults.notificationPermissionGranted,
     lastCaptureAt: typeof merged.lastCaptureAt === 'number' ? merged.lastCaptureAt : defaults.lastCaptureAt,
     lastError: typeof merged.lastError === 'string' ? merged.lastError : defaults.lastError,
+    paymentAutoCapture:
+      typeof merged.paymentAutoCapture === 'boolean' ? merged.paymentAutoCapture : defaults.paymentAutoCapture,
+    rememberedPages: normalizeRememberedPages(merged.rememberedPages),
   };
 };
 
@@ -555,6 +577,25 @@ export const openNativeAccessibilitySettings = async () => {
     ...defaultAutoBookkeepingSettings(),
     ...(await ScreenCaptureBookkeeping.openAccessibilitySettings()),
   };
+};
+
+export const setNativePaymentAutoCapture = async (enabled: boolean) => {
+  if (!isAndroidNative()) {
+    return { ...defaultAutoBookkeepingSettings(), paymentAutoCapture: enabled };
+  }
+
+  return {
+    ...defaultAutoBookkeepingSettings(),
+    ...(await ScreenCaptureBookkeeping.setPaymentAutoCapture({ enabled })),
+  };
+};
+
+export const removeNativeRememberedPage = async (key: string) => {
+  if (!isAndroidNative()) {
+    return defaultAutoBookkeepingSettings();
+  }
+
+  return normalizeAutoBookkeepingSettings(await ScreenCaptureBookkeeping.removeRememberedPage({ key }));
 };
 
 export const captureNativeNow = async () => {

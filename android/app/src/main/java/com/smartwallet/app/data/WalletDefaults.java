@@ -98,6 +98,8 @@ public final class WalletDefaults {
         safePut(object, "notificationPermissionGranted", false);
         safePut(object, "lastCaptureAt", 0);
         safePut(object, "lastError", "");
+        safePut(object, "paymentAutoCapture", true);
+        safePut(object, "rememberedPages", new JSONArray());
         return object;
     }
 

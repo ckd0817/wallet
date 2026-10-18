@@ -5,7 +5,10 @@
     <string name="package_name">com.smartwallet.app</string>
     <string name="custom_url_scheme">com.smartwallet.app</string>
     <string name="accessibility_capture_service_label">截图自动记账</string>
-    <string name="accessibility_capture_service_description">开启后可通过通知栏手动触发截图自动记账。</string>
+    <string name="accessibility_capture_service_description">支付完成页和已记住页面自动记账，也可在通知栏截图记账。</string>
+    <string name="remember_page_title">记住此页面</string>
+    <string name="remember_page_cancel">取消</string>
+    <string name="remember_page_confirm">记住</string>
     <string name="screen_capture_channel_name">截图自动记账</string>
     <string name="screen_capture_channel_description">显示截图记账入口。</string>
     <string name="screen_capture_alert_channel_name">截图记账提醒</string>

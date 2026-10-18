@@ -217,11 +217,21 @@ export interface LLMConfigTestResult {
   failureStage?: string;
 }
 
+export interface RememberedCapturePage {
+  key: string;
+  packageName: string;
+  activityName: string;
+  appLabel: string;
+  addedAt: number;
+}
+
 export interface AutoBookkeepingSettings {
   accessibilityEnabled: boolean;
   notificationPermissionGranted: boolean;
   lastCaptureAt: number;
   lastError: string;
+  paymentAutoCapture: boolean;
+  rememberedPages: RememberedCapturePage[];
 }
 
 export interface AppSettings {
