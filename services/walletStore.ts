@@ -522,7 +522,7 @@ export const syncWebAssetQuotes = async (
   }
 
   if (assetHoldings.some((holding) => getAssetCurrency(holding) === 'USD')) {
-    const response = await fetch('https://152.32.147.55:8443/api/v1/market/exchange-rate?base=USD&quote=CNY');
+    const response = await fetch('https://wallet.kaida.sbs/api/v1/market/exchange-rate?base=USD&quote=CNY');
     const quote = parseUsdCnyRateResponse(await response.text(), syncedAt);
     if (quote) {
       quotes.push(quote);

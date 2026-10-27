@@ -12,7 +12,8 @@ import com.smartwallet.app.CloudSyncPlugin;
 import static com.smartwallet.app.data.SyncDocument.*;
 
 public final class CloudSync {
-    public static final String API="https://152.32.147.55:8443/api/v1";
+    public static final String ORIGIN="https://wallet.kaida.sbs";
+    public static final String API=ORIGIN+"/api/v1";
     public static final Object NETWORK_LOCK=new Object();
     private static volatile boolean syncing=false;
     private final Context context;
@@ -61,7 +62,7 @@ public final class CloudSync {
         }finally{connection.disconnect();}
     }
     public JSONObject ping() throws Exception {
-        HttpURLConnection connection=(HttpURLConnection)new URL("https://152.32.147.55:8443/health").openConnection();
+        HttpURLConnection connection=(HttpURLConnection)new URL(ORIGIN+"/health").openConnection();
         connection.setConnectTimeout(15000);connection.setReadTimeout(15000);
         try {
             if(connection.getResponseCode()!=200)throw new IOException("服务器连接失败");

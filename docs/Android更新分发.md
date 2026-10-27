@@ -13,7 +13,7 @@
 | Android 构建工具 | `E:\AndroidStudioSDK\build-tools\36.1.0` |
 | ADB | `E:\AndroidStudioSDK\platform-tools\adb.exe` |
 | 默认 SSH 主机 | 本机已配置的 `vps` |
-| 版本接口 | `https://152.32.147.55:8443/api/v1/app-updates/android` |
+| 版本接口 | `https://wallet.kaida.sbs/api/v1/app-updates/android` |
 | 服务端发布目录 | `/var/lib/wallet/releases` |
 
 必须沿用现有 Debug keystore，不生成新签名，不构建或分发 Release APK。固定签名的 SHA-256 指纹为：
@@ -32,7 +32,7 @@
 
    ```powershell
    Set-Location E:\Project\wallet
-   $latest = Invoke-RestMethod 'https://152.32.147.55:8443/api/v1/app-updates/android'
+   $latest = Invoke-RestMethod 'https://wallet.kaida.sbs/api/v1/app-updates/android'
    $latest.release
    ```
 
@@ -79,7 +79,7 @@
 5. 核验发布结果：
 
    ```powershell
-   $latest = Invoke-RestMethod 'https://152.32.147.55:8443/api/v1/app-updates/android'
+   $latest = Invoke-RestMethod 'https://wallet.kaida.sbs/api/v1/app-updates/android'
    $apk = Get-Item '.\android\app\build\outputs\apk\debug\app-debug.apk'
    $hash = (Get-FileHash $apk.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
    if ($latest.release.sha256 -ne $hash -or $latest.release.size -ne $apk.Length) {
@@ -113,8 +113,8 @@
 没有更新功能的旧客户端必须先安装一次带更新功能的 Debug APK；之后即可通过应用内更新。可根据版本接口返回的 `versionCode` 获取首个安装包：
 
 ```powershell
-$latest = Invoke-RestMethod 'https://152.32.147.55:8443/api/v1/app-updates/android'
-"https://152.32.147.55:8443/api/v1/app-updates/android/$($latest.release.versionCode).apk"
+$latest = Invoke-RestMethod 'https://wallet.kaida.sbs/api/v1/app-updates/android'
+"https://wallet.kaida.sbs/api/v1/app-updates/android/$($latest.release.versionCode).apk"
 ```
 
 | 现象 | 处理 |

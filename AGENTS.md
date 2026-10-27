@@ -33,7 +33,7 @@
 - 应用启动时向现有云服务器检查更新，设置页保留手动检查入口。
 - 对用户分发新版本时，使用 `scripts\publish-android-update.ps1` 构建并发布 Debug APK，不再逐个发送安装包。
 - 发布前递增 `android\app\build.gradle` 的 `versionCode` 并更新 `versionName`，不得覆盖已发布的版本号。
-- 更新服务地址：`https://152.32.147.55:8443/api/v1/app-updates/android`。
+- 更新服务地址：`https://wallet.kaida.sbs/api/v1/app-updates/android`。
 - 服务端版本清单与安装包保存在仓库外 `/var/lib/wallet/releases`，沿用本机固定 Debug 签名。
 - 更新下载后只校验大小和 SHA-256，签名兼容性由 Android 系统安装程序判断。
 
