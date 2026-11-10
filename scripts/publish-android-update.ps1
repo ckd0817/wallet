@@ -1,4 +1,4 @@
-param([string]$Server = 'vps', [switch]$SkipBuild)
+param([string]$Server = 'vps', [ValidateRange(1, 65535)][int]$Port = 2222, [switch]$SkipBuild)
 $ErrorActionPreference = 'Stop'
 $projectPath = Split-Path $PSScriptRoot -Parent
 $env:JAVA_HOME = 'E:\Java\jdk-21'
@@ -27,13 +27,13 @@ try {
     $versionName = $packageMatch.Groups[2].Value
     if ($versionName -notmatch '^[a-zA-Z0-9._-]+$') { throw '版本名只能包含字母、数字、点、下划线和连字符' }
     $uploadName = 'wallet-update-' + [guid]::NewGuid().ToString('N')
-    & scp $apkPath "${Server}:/tmp/$uploadName.apk"
+    & scp -P $Port $apkPath "${Server}:/tmp/$uploadName.apk"
     Assert-CommandSuccess '上传安装包失败'
-    & scp (Join-Path $projectPath 'server\deploy\publish-update.sh') "${Server}:/tmp/$uploadName.sh"
+    & scp -P $Port (Join-Path $projectPath 'server\deploy\publish-update.sh') "${Server}:/tmp/$uploadName.sh"
     Assert-CommandSuccess '上传发布脚本失败'
-    & ssh $Server "sudo bash /tmp/$uploadName.sh /tmp/$uploadName.apk $versionCode $versionName"
+    & ssh -p $Port $Server "sudo bash /tmp/$uploadName.sh /tmp/$uploadName.apk $versionCode $versionName"
     Assert-CommandSuccess '发布更新失败'
-    & ssh $Server "rm -- /tmp/$uploadName.apk /tmp/$uploadName.sh"
+    & ssh -p $Port $Server "rm -- /tmp/$uploadName.apk /tmp/$uploadName.sh"
     Assert-CommandSuccess '清理临时文件失败'
     Write-Output "已发布 Debug $versionName（$versionCode）"
 } finally { Pop-Location }

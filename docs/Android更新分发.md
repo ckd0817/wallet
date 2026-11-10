@@ -13,6 +13,7 @@
 | Android 构建工具 | `E:\AndroidStudioSDK\build-tools\36.1.0` |
 | ADB | `E:\AndroidStudioSDK\platform-tools\adb.exe` |
 | 默认 SSH 主机 | 本机已配置的 `vps` |
+| 默认 SSH 端口 | `2222`，可用 `-Port` 指定 |
 | 版本接口 | `https://wallet.kaida.sbs/api/v1/app-updates/android` |
 | 服务端发布目录 | `/var/lib/wallet/releases` |
 
@@ -121,7 +122,7 @@ $latest = Invoke-RestMethod 'https://wallet.kaida.sbs/api/v1/app-updates/android
 | --- | --- |
 | 版本号必须递增 | 查询服务器版本，递增 `versionCode`，重新构建 |
 | 签名或 Debug 校验失败 | 确认使用本机原有 Debug keystore 和 `assembleDebug`，不要卸载旧应用 |
-| 上传失败 | 检查 `ssh vps`、网络和部署权限，修复后重试 |
+| 上传失败 | 检查 `ssh -p 2222 vps`、网络和部署权限，修复后重试 |
 | 上传后脚本报错 | 先查询版本接口；若同一版本及 SHA-256 已发布成功，不重复发布该版本号 |
 | 检查更新失败 | 检查 `/health`、版本接口、HTTPS 证书和 `wallet.service` 状态 |
 | 下载或完整性校验失败 | 重试下载；确认版本清单的大小、SHA-256 与对应 APK 一致 |

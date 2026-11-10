@@ -15,6 +15,7 @@ import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.annotation.Permission;
 import com.smartwallet.app.accessibility.AccessibilityCaptureService;
+import com.smartwallet.app.accessibility.AccessibilityRecoveryAccess;
 import com.smartwallet.app.accessibility.RememberedPageStore;
 import com.smartwallet.app.data.WalletRepository;
 import com.smartwallet.app.screencapture.CaptureAnalysisClient;
@@ -64,6 +65,59 @@ public class ScreenCaptureBookkeepingPlugin extends Plugin {
     @PluginMethod
     public void getStatus(PluginCall call) {
         call.resolve(buildStatus());
+    }
+
+    @PluginMethod
+    public void getRecoveryStatus(PluginCall call) {
+        try {
+            call.resolve(AccessibilityRecoveryAccess.status(getContext()));
+        } catch (RuntimeException error) {
+            call.reject("授权状态检测失败", error);
+        }
+    }
+
+    @PluginMethod
+    public void copyRecoveryGrantCommand(PluginCall call) {
+        try {
+            AccessibilityRecoveryAccess.copyGrantCommand(getContext());
+            call.resolve();
+        } catch (RuntimeException error) {
+            call.reject("复制失败", error);
+        }
+    }
+
+    @PluginMethod
+    public void openRecoveryBackgroundSettings(PluginCall call) {
+        try {
+            JSObject result = new JSObject();
+            result.put("destination", AccessibilityRecoveryAccess.openBackgroundSettings(getContext()));
+            call.resolve(result);
+        } catch (RuntimeException error) {
+            call.reject("无法打开后台设置", error);
+        }
+    }
+
+    @PluginMethod
+    public void openRecoveryDeveloperSettings(PluginCall call) {
+        try {
+            AccessibilityRecoveryAccess.openDeveloperSettings(getContext());
+            call.resolve();
+        } catch (RuntimeException error) {
+            call.reject("无法打开开发者设置", error);
+        }
+    }
+
+    @PluginMethod
+    public void openRecoveryNotificationSettings(PluginCall call) {
+        try {
+            Intent intent = new Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS);
+            intent.putExtra(Settings.EXTRA_APP_PACKAGE, getContext().getPackageName());
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(intent);
+            call.resolve();
+        } catch (RuntimeException error) {
+            call.reject("无法打开通知设置", error);
+        }
     }
 
     @PluginMethod

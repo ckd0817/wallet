@@ -1298,7 +1298,6 @@ const App: React.FC = () => {
             onTogglePaymentAutoCapture={handleTogglePaymentAutoCapture}
             onRemoveRememberedPage={handleRemoveRememberedPage}
             onTestModelConfig={handleTestModelConfig}
-            onRefreshAutoBookkeepingStatus={refreshAutoBookkeepingStatus}
             onRetryCaptureLog={handleRetryCaptureLog}
           />
         );
@@ -1339,7 +1338,8 @@ const App: React.FC = () => {
   return (
     <div className="min-h-screen bg-background text-primary font-sans relative">
       <AppUpdate />
-      <header className="sticky top-0 z-30 bg-background/80 backdrop-blur-xl border-b border-border px-6 h-16 flex items-center justify-between transition-all">
+      <header className="sticky z-30 bg-background/80 backdrop-blur-xl border-b border-border px-6 h-16 flex items-center justify-between" style={{ top: 'env(safe-area-inset-top)' }}>
+        <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 bg-background" style={{ bottom: '100%', height: 'env(safe-area-inset-top)' }} />
         <h1 className="text-2xl font-bold tracking-tight text-primary">{getHeaderTitle()}</h1>
       </header>
 

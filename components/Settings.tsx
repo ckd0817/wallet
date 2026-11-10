@@ -1,9 +1,6 @@
-import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
-  Battery,
-  Bell,
   Bot,
-  Camera,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
@@ -11,7 +8,6 @@ import {
   CircleAlert,
   Clock3,
   Download,
-  Eye,
   RefreshCcw,
   Trash2,
   Upload,
@@ -38,7 +34,8 @@ import {
   WalletBackupData,
 } from '../types';
 import { buildBackupPayload, parseBackupFile } from '../services/dataBackup';
-import { DEFAULT_CAPTURE_PROMPT, isNativeIgnoringBatteryOptimizations, requestNativeIgnoreBatteryOptimization } from '../services/walletStore';
+import { DEFAULT_CAPTURE_PROMPT } from '../services/walletStore';
+import AccessibilityRecoverySetup from './AccessibilityRecoverySetup';
 import { getRetryableCaptureLogIds } from './captureLogRetry';
 import CloudAccount from './CloudAccount';
 import { requestUpdateCheck } from '../services/appUpdate';
@@ -78,7 +75,6 @@ interface SettingsProps {
   onTogglePaymentAutoCapture: (enabled: boolean) => Promise<void> | void;
   onRemoveRememberedPage: (key: string) => Promise<void> | void;
   onTestModelConfig: () => Promise<LLMConfigTestResult> | LLMConfigTestResult;
-  onRefreshAutoBookkeepingStatus: () => Promise<void> | void;
   onRetryCaptureLog: (logId: string) => Promise<void> | void;
 }
 
@@ -103,7 +99,6 @@ const Settings: React.FC<SettingsProps> = ({
   onTogglePaymentAutoCapture,
   onRemoveRememberedPage,
   onTestModelConfig,
-  onRefreshAutoBookkeepingStatus,
   onRetryCaptureLog,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -114,8 +109,6 @@ const Settings: React.FC<SettingsProps> = ({
     direction: 'forward' | 'backward' | 'none';
   } | null>(null);
   const [importMode, setImportMode] = useState<'append' | 'overwrite'>('append');
-  const [isRefreshingStatus, setIsRefreshingStatus] = useState(false);
-  const [isOpeningAccessibilitySettings, setIsOpeningAccessibilitySettings] = useState(false);
   const [isUpdatingPaymentAutoCapture, setIsUpdatingPaymentAutoCapture] = useState(false);
   const [removingPageKeys, setRemovingPageKeys] = useState<Record<string, boolean>>({});
   const rememberedPages = autoBookkeepingSettings.rememberedPages ?? [];
@@ -123,60 +116,19 @@ const Settings: React.FC<SettingsProps> = ({
   const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
   const [modelTestResult, setModelTestResult] = useState<LLMConfigTestResult | null>(null);
   const [isAdvancedConfigOpen, setIsAdvancedConfigOpen] = useState(false);
-  const [isCaptureLogsOpen, setIsCaptureLogsOpen] = useState(false);
+  const [activeSection, setActiveSection] = useState<string | null>(null);
+  const toggleSection = (section: string) => setActiveSection(current => current === section ? null : section);
   const [isModelTestDetailsOpen, setIsModelTestDetailsOpen] = useState(false);
   const [retryingLogIds, setRetryingLogIds] = useState<Record<string, boolean>>({});
-  const [batteryOptimizationStatus, setBatteryOptimizationStatus] = useState<'checking' | 'ignored' | 'not_ignored'>('checking');
-  const [isRequestingBatteryOptimization, setIsRequestingBatteryOptimization] = useState(false);
   const [fundSourceChecks, setFundSourceChecks] = useState<Partial<Record<FundQuoteSourceOption, FundSourceCheck>>>({});
 
   const isAndroidNative = Capacitor.getPlatform() === 'android';
   const llmConfigured = Boolean(llmConfig.apiKey && llmConfig.baseUrl && llmConfig.modelName);
-  const llmReady = llmConfigured;
-  const latestCaptureText = autoBookkeepingSettings.lastCaptureAt
-    ? new Date(autoBookkeepingSettings.lastCaptureAt).toLocaleString('zh-CN')
-    : '暂无';
-
-  const statusCards = useMemo(
-    () => [
-      {
-        icon: Eye,
-        label: '无障碍服务',
-        value: autoBookkeepingSettings.accessibilityEnabled ? '已开启' : '未开启',
-      },
-      {
-        icon: Bell,
-        label: '通知权限',
-        value: autoBookkeepingSettings.notificationPermissionGranted ? '已允许' : '未允许',
-      },
-      {
-        icon: Bot,
-        label: '模型状态',
-        value: llmReady ? '已配置' : '未配置',
-      },
-      {
-        icon: Camera,
-        label: '最近截图',
-        value: latestCaptureText,
-      },
-    ],
-    [
-      autoBookkeepingSettings.notificationPermissionGranted,
-      autoBookkeepingSettings.accessibilityEnabled,
-      latestCaptureText,
-      llmReady,
-    ],
-  );
-
   const transactionLookup = useMemo(
     () => new Map(transactions.map((transaction) => [transaction.id, transaction])),
     [transactions],
   );
   const retryableLogIds = useMemo(() => getRetryableCaptureLogIds(captureLogs), [captureLogs]);
-
-  useEffect(() => {
-    checkBatteryOptimization();
-  }, []);
 
   useLayoutEffect(() => {
     const textarea = capturePromptRef.current;
@@ -206,29 +158,6 @@ const Settings: React.FC<SettingsProps> = ({
       return '';
     }
     return imagePath.startsWith('file://') ? Capacitor.convertFileSrc(imagePath) : imagePath;
-  };
-
-  const checkBatteryOptimization = async () => {
-    if (!isAndroidNative) {
-      setBatteryOptimizationStatus('ignored');
-      return;
-    }
-    try {
-      const ignoring = await isNativeIgnoringBatteryOptimizations();
-      setBatteryOptimizationStatus(ignoring ? 'ignored' : 'not_ignored');
-    } catch {
-      setBatteryOptimizationStatus('not_ignored');
-    }
-  };
-
-  const handleRequestBatteryOptimization = async () => {
-    setIsRequestingBatteryOptimization(true);
-    try {
-      const ignoring = await requestNativeIgnoreBatteryOptimization();
-      setBatteryOptimizationStatus(ignoring ? 'ignored' : 'not_ignored');
-    } finally {
-      setIsRequestingBatteryOptimization(false);
-    }
   };
 
   const handleExport = async () => {
@@ -305,24 +234,6 @@ const Settings: React.FC<SettingsProps> = ({
     reader.readAsText(file);
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
-    }
-  };
-
-  const handleRefreshStatus = async () => {
-    setIsRefreshingStatus(true);
-    try {
-      await onRefreshAutoBookkeepingStatus();
-    } finally {
-      setIsRefreshingStatus(false);
-    }
-  };
-
-  const handleOpenAccessibility = async () => {
-    setIsOpeningAccessibilitySettings(true);
-    try {
-      await onOpenAccessibilitySettings();
-    } finally {
-      setIsOpeningAccessibilitySettings(false);
     }
   };
 
@@ -424,132 +335,21 @@ const Settings: React.FC<SettingsProps> = ({
   };
 
   return (
-    <div className="flex flex-col h-full space-y-8 animate-slide-up pb-32">
-      {isAndroidNative && <CloudAccount />}
-      {isAndroidNative && <button type="button" onClick={requestUpdateCheck} className="flex w-full items-center justify-between rounded-2xl border border-border bg-white p-5 text-left">
-        <span className="text-base font-semibold text-primary">检查更新</span>
-        <ChevronRight className="h-5 w-5 text-secondary" />
-      </button>}
+    <div className="space-y-6 pb-12">
       <section>
-        <SectionHeader title="截图自动记账" />
-
-        <div className="rounded-[28px] border border-border bg-white p-5 shadow-sm sm:p-6">
-          <div className="space-y-6">
-            <div>
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-                {statusCards.map(({ icon: Icon, label, value }) => (
-                  <React.Fragment key={label}>
-                    <StatusCard icon={Icon} label={label} value={value} />
-                  </React.Fragment>
-                ))}
-              </div>
-
-              {autoBookkeepingSettings.lastError && (
-                <div className="mt-4 rounded-2xl border border-amber-100 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                  最近错误：{autoBookkeepingSettings.lastError}
-                </div>
-              )}
-
-              <div className="mt-4 flex items-center justify-between gap-3 rounded-3xl border border-border bg-surface/40 px-4 py-3">
-                <div className="min-w-0">
-                  <p id="payment-auto-capture-label" className="text-sm font-semibold text-primary">自动识别</p>
-                  <p className="mt-0.5 text-xs text-secondary">
-                    支付完成页{rememberedPages.length > 0 ? ` · 已记住 ${rememberedPages.length} 个页面` : ''}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={autoBookkeepingSettings.paymentAutoCapture}
-                  aria-labelledby="payment-auto-capture-label"
-                  onClick={handleTogglePaymentAutoCapture}
-                  disabled={isUpdatingPaymentAutoCapture || !isAndroidNative}
-                  className={`relative inline-flex h-7 w-12 flex-shrink-0 items-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-                    autoBookkeepingSettings.paymentAutoCapture ? 'bg-primary' : 'bg-zinc-200'
-                  }`}
-                >
-                  <span
-                    className={`inline-block h-5 w-5 rounded-full bg-white shadow transition-transform ${
-                      autoBookkeepingSettings.paymentAutoCapture ? 'translate-x-6' : 'translate-x-1'
-                    }`}
-                  />
-                </button>
-              </div>
-
-              {rememberedPages.length > 0 && (
-                <ul className="mt-3 divide-y divide-zinc-100 rounded-3xl border border-border bg-white">
-                  {rememberedPages.map((page) => (
-                    <li key={page.key} className="flex items-center justify-between gap-3 px-4 py-3">
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-medium text-primary">{page.appLabel}</p>
-                        {page.activityName && (
-                          <p className="truncate text-xs text-secondary">{page.activityName.split('.').pop()}</p>
-                        )}
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveRememberedPage(page.key)}
-                        disabled={Boolean(removingPageKeys[page.key])}
-                        aria-label={`移除 ${page.appLabel}`}
-                        className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-2xl text-secondary transition-colors hover:bg-zinc-100 hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-
-              <div className="mt-5 grid grid-cols-2 gap-3">
-                <PrimaryActionButton
-                  onClick={handleOpenAccessibility}
-                  disabled={isOpeningAccessibilitySettings || !isAndroidNative}
-                  icon={Eye}
-                  tone="primary"
-                >
-                  {isOpeningAccessibilitySettings ? '打开中...' : '去开启无障碍'}
-                </PrimaryActionButton>
-                <PrimaryActionButton
-                  onClick={handleRefreshStatus}
-                  disabled={isRefreshingStatus || !isAndroidNative}
-                  icon={RefreshCcw}
-                  tone="ghost"
-                >
-                  {isRefreshingStatus ? '刷新中...' : '刷新状态'}
-                </PrimaryActionButton>
-              </div>
-
-              {isAndroidNative && autoBookkeepingSettings.accessibilityEnabled && batteryOptimizationStatus !== 'ignored' && (
-                <div className="mt-4 rounded-2xl border border-amber-100 bg-amber-50 p-4">
-                  <div className="flex items-start gap-3">
-                    <Battery className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold text-amber-800">关闭电池优化</p>
-                      <p className="mt-1 text-xs text-amber-700">系统可能因省电策略杀掉后台服务，建议关闭电池优化以保持截图记账稳定运行</p>
-                      <button
-                        onClick={handleRequestBatteryOptimization}
-                        disabled={isRequestingBatteryOptimization}
-                        className="mt-3 inline-flex items-center justify-center gap-2 rounded-2xl bg-amber-600 px-4 py-2.5 text-xs font-semibold text-white transition-colors hover:bg-amber-700 disabled:cursor-not-allowed disabled:bg-amber-300"
-                      >
-                        {isRequestingBatteryOptimization ? '请求中...' : '去关闭电池优化'}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            <div className="border-t border-zinc-100 pt-6">
-              <div className="mb-4 flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-sm font-semibold text-primary">模型配置</p>
-                </div>
-                {llmConfigured ? <InlineBadge tone="success">已配置</InlineBadge> : <InlineBadge tone="warning">未完成配置</InlineBadge>}
-              </div>
-
+        <SectionHeader title="记账" />
+        <div className="overflow-hidden rounded-3xl border border-border bg-white divide-y divide-border">
+          <SettingsPanel id="setup" title="使用设置" open={activeSection === 'setup'} onToggle={toggleSection}>
+            {isAndroidNative && <AccessibilityRecoverySetup onOpenAccessibilitySettings={onOpenAccessibilitySettings} />}
+            <details className="rounded-2xl border border-border">
+              <summary className="flex cursor-pointer items-center justify-between gap-3 px-4 py-4 text-sm font-semibold text-primary">
+                识别模型<span className="text-xs font-normal text-secondary">{llmConfigured ? '已配置' : '未配置'}</span>
+              </summary>
+              <div className="border-t border-border p-4">
+            <div className="pt-2">
               <div className="flex flex-col gap-4">
                 <div className="grid gap-4">
-                  <ConfigField label="Api Key">
+                  <ConfigField label="API 密钥">
                     <input
                       type="password"
                       value={llmConfig.apiKey}
@@ -560,7 +360,7 @@ const Settings: React.FC<SettingsProps> = ({
                   </ConfigField>
 
                   <div className="grid gap-4 sm:grid-cols-2">
-                    <ConfigField label="Base URL">
+                    <ConfigField label="接口地址">
                       <input
                         type="text"
                         value={llmConfig.baseUrl}
@@ -569,7 +369,7 @@ const Settings: React.FC<SettingsProps> = ({
                         className="w-full rounded-2xl border border-border bg-surface px-4 py-3 text-sm text-primary"
                       />
                     </ConfigField>
-                    <ConfigField label="Model Name">
+                    <ConfigField label="模型名称">
                       <input
                         type="text"
                         value={llmConfig.modelName}
@@ -642,7 +442,7 @@ const Settings: React.FC<SettingsProps> = ({
                 >
                   <div>
                     <p className="text-sm font-semibold text-primary">高级配置</p>
-                    <p className="mt-1 text-xs text-secondary">Timeout · Prompt</p>
+
                   </div>
                   {isAdvancedConfigOpen ? (
                     <ChevronUp className="w-4 h-4 text-zinc-400" />
@@ -653,7 +453,7 @@ const Settings: React.FC<SettingsProps> = ({
 
                 {isAdvancedConfigOpen && (
                   <div className="space-y-4 rounded-3xl border border-border bg-surface/30 p-4">
-                    <ConfigField label="Timeout (ms)">
+                    <ConfigField label="请求超时（毫秒）">
                       <input
                         type="number"
                         min={1000}
@@ -699,36 +499,68 @@ const Settings: React.FC<SettingsProps> = ({
               </div>
             </div>
 
-            <div className="border-t border-zinc-100 pt-6">
-              <button
-                type="button"
-                onClick={() => {
-                  setIsCaptureLogsOpen((current) => {
-                    if (current) {
-                      setExpandedLogId(null);
-                    }
-                    return !current;
-                  });
-                }}
-                className="flex w-full items-center justify-between gap-4 rounded-3xl border border-border bg-surface/40 px-4 py-4 text-left transition-colors hover:bg-surface/60"
-              >
-                <div className="min-w-0">
-                  <div className="flex items-center gap-3">
-                    <p className="text-sm font-semibold text-primary">分析日志</p>
-                    <span className="rounded-full bg-white px-2.5 py-1 text-[11px] font-medium text-zinc-500">
-                      {captureLogs.length > 0 ? `${captureLogs.length} 条` : '暂无'}
-                    </span>
-                  </div>
-                </div>
-                {isCaptureLogsOpen ? (
-                  <ChevronUp className="w-4 h-4 flex-shrink-0 text-zinc-400" />
-                ) : (
-                  <ChevronDown className="w-4 h-4 flex-shrink-0 text-zinc-400" />
-                )}
-              </button>
 
-              {isCaptureLogsOpen && (
-                <div className="mt-4 overflow-hidden rounded-[28px] border border-zinc-200 bg-zinc-50/70 shadow-sm divide-y divide-zinc-200">
+              </div>
+            </details>
+          </SettingsPanel>
+          <SettingsPanel id="automatic" title="自动识别" value={autoBookkeepingSettings.paymentAutoCapture ? '已开启' : '已关闭'} open={activeSection === 'automatic'} onToggle={toggleSection}>
+              <div className="mt-4 flex items-center justify-between gap-3 rounded-3xl border border-border bg-surface/40 px-4 py-3">
+                <div className="min-w-0">
+                  <p id="payment-auto-capture-label" className="text-sm font-semibold text-primary">自动识别</p>
+
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={autoBookkeepingSettings.paymentAutoCapture}
+                  aria-labelledby="payment-auto-capture-label"
+                  onClick={handleTogglePaymentAutoCapture}
+                  disabled={isUpdatingPaymentAutoCapture || !isAndroidNative}
+                  className={`relative inline-flex h-7 w-12 flex-shrink-0 items-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                    autoBookkeepingSettings.paymentAutoCapture ? 'bg-primary' : 'bg-zinc-200'
+                  }`}
+                >
+                  <span
+                    className={`inline-block h-5 w-5 rounded-full bg-white shadow transition-transform ${
+                      autoBookkeepingSettings.paymentAutoCapture ? 'translate-x-6' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+              </div>
+
+
+              {rememberedPages.length > 0 && (
+                <details className="mt-4 rounded-2xl border border-border">
+                  <summary className="cursor-pointer px-4 py-3 text-sm font-medium text-primary">已记住页面 · {rememberedPages.length}</summary>
+                <ul className="divide-y divide-zinc-100 border-t border-border bg-white">
+                  {rememberedPages.map((page) => (
+                    <li key={page.key} className="flex items-center justify-between gap-3 px-4 py-3">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium text-primary">{page.appLabel}</p>
+                        {page.activityName && (
+                          <p className="truncate text-xs text-secondary">{page.activityName.split('.').pop()}</p>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveRememberedPage(page.key)}
+                        disabled={Boolean(removingPageKeys[page.key])}
+                        aria-label={`移除 ${page.appLabel}`}
+                        className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-2xl text-secondary transition-colors hover:bg-zinc-100 hover:text-primary disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+                </details>
+              )}
+
+
+          </SettingsPanel>
+          <SettingsPanel id="logs" title="识别记录" value={String(captureLogs.length)} open={activeSection === 'logs'} onToggle={toggleSection}>
+            {autoBookkeepingSettings.lastError && <p className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">{autoBookkeepingSettings.lastError}</p>}
+                <div className="overflow-hidden rounded-[28px] border border-zinc-200 bg-zinc-50/70 shadow-sm divide-y divide-zinc-200">
                   {captureLogs.length === 0 ? (
                     <div className="p-6 text-center text-sm text-zinc-400">暂无分析日志</div>
                   ) : (
@@ -848,14 +680,73 @@ const Settings: React.FC<SettingsProps> = ({
                     })
                   )}
                 </div>
-              )}
+          </SettingsPanel>
+        </div>
+      </section>
+      <section>
+        <SectionHeader title="账户与数据" />
+        <div className="overflow-hidden rounded-3xl border border-border bg-white divide-y divide-border">
+          {isAndroidNative && <SettingsPanel id="account" title="云端账户" open={activeSection === 'account'} onToggle={toggleSection}><CloudAccount embedded /></SettingsPanel>}
+          <SettingsPanel id="backup" title="备份与恢复" open={activeSection === 'backup'} onToggle={toggleSection}>
+      <section>
+        <div className="grid gap-4">
+          <button
+            onClick={handleExport}
+            className="flex items-center justify-between rounded-[28px] border border-border bg-white px-5 py-5 text-left shadow-sm transition-colors hover:bg-surface/40"
+          >
+            <div className="flex items-center gap-4">
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-surface text-primary">
+                <Download className="w-5 h-5" />
+              </div>
+              <div>
+                <p className="text-base font-semibold text-primary">导出备份</p>
+              </div>
             </div>
+            <ChevronRight className="w-5 h-5 text-zinc-300" />
+          </button>
+
+          <div className="rounded-[28px] border border-border bg-white p-5 shadow-sm">
+            <div className="flex items-center gap-4">
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-surface text-primary">
+                <Upload className="w-5 h-5" />
+              </div>
+              <p className="text-base font-semibold text-primary">导入备份</p>
+            </div>
+
+            <div className="mt-5 flex gap-3 rounded-2xl bg-surface p-1">
+              <button
+                onClick={() => setImportMode('append')}
+                className={`flex-1 rounded-xl px-4 py-2.5 text-sm font-medium transition-colors ${
+                  importMode === 'append' ? 'bg-white text-primary shadow-sm' : 'text-secondary'
+                }`}
+              >
+                追加模式
+              </button>
+              <button
+                onClick={() => setImportMode('overwrite')}
+                className={`flex-1 rounded-xl px-4 py-2.5 text-sm font-medium transition-colors ${
+                  importMode === 'overwrite' ? 'bg-danger text-white shadow-sm' : 'text-secondary'
+                }`}
+              >
+                覆盖模式
+              </button>
+            </div>
+
+            <input type="file" ref={fileInputRef} accept=".json,application/json" onChange={processImport} className="hidden" />
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="mt-4 w-full rounded-2xl bg-primary py-3 text-sm font-semibold text-white transition-colors hover:bg-zinc-800"
+            >
+              选择 JSON 文件
+            </button>
           </div>
         </div>
       </section>
 
+
+          </SettingsPanel>
+          <SettingsPanel id="recurring" title="周期记账" value={String(recurringProfiles.length)} open={activeSection === 'recurring'} onToggle={toggleSection}>
       <section>
-        <SectionHeader title="周期性记账规则" />
         <div className="overflow-hidden rounded-[28px] border border-border bg-white shadow-sm divide-y divide-border">
           {recurringProfiles.length === 0 ? (
             <div className="p-6 text-center text-base text-zinc-400">暂无生效规则</div>
@@ -889,63 +780,15 @@ const Settings: React.FC<SettingsProps> = ({
         </div>
       </section>
 
-      <section>
-        <SectionHeader title="数据管理" />
-        <div className="grid gap-4">
-          <button
-            onClick={handleExport}
-            className="flex items-center justify-between rounded-[28px] border border-border bg-white px-5 py-5 text-left shadow-sm transition-colors hover:bg-surface/40"
-          >
-            <div className="flex items-center gap-4">
-              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-surface text-primary">
-                <Download className="w-5 h-5" />
-              </div>
-              <div>
-                <p className="text-base font-semibold text-primary">导出 JSON 备份</p>
-                <p className="mt-1 text-xs text-secondary">交易 · 分类 · 周期规则</p>
-              </div>
-            </div>
-            <ChevronRight className="w-5 h-5 text-zinc-300" />
-          </button>
 
-          <div className="rounded-[28px] border border-border bg-white p-5 shadow-sm">
-            <div className="flex items-center gap-4">
-              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-surface text-primary">
-                <Upload className="w-5 h-5" />
-              </div>
-              <p className="text-base font-semibold text-primary">导入 JSON 备份</p>
-            </div>
-
-            <div className="mt-5 flex gap-3 rounded-2xl bg-surface p-1">
-              <button
-                onClick={() => setImportMode('append')}
-                className={`flex-1 rounded-xl px-4 py-2.5 text-sm font-medium transition-colors ${
-                  importMode === 'append' ? 'bg-white text-primary shadow-sm' : 'text-secondary'
-                }`}
-              >
-                追加模式
-              </button>
-              <button
-                onClick={() => setImportMode('overwrite')}
-                className={`flex-1 rounded-xl px-4 py-2.5 text-sm font-medium transition-colors ${
-                  importMode === 'overwrite' ? 'bg-danger text-white shadow-sm' : 'text-secondary'
-                }`}
-              >
-                覆盖模式
-              </button>
-            </div>
-
-            <input type="file" ref={fileInputRef} accept=".json,application/json" onChange={processImport} className="hidden" />
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              className="mt-4 w-full rounded-2xl bg-primary py-3 text-sm font-semibold text-white transition-colors hover:bg-zinc-800"
-            >
-              选择 JSON 文件
-            </button>
-          </div>
+          </SettingsPanel>
         </div>
       </section>
-
+      <section>
+        <SectionHeader title="通用" />
+        <div className="overflow-hidden rounded-3xl border border-border bg-white divide-y divide-border">
+          <SettingsPanel id="preferences" title="统计与行情" open={activeSection === 'preferences'} onToggle={toggleSection}>
+            <div className="space-y-5">
       <section>
         <SectionHeader title="基金数据源" />
         <div className="overflow-hidden rounded-[28px] border border-border bg-white shadow-sm divide-y divide-border">
@@ -1006,7 +849,6 @@ const Settings: React.FC<SettingsProps> = ({
             </div>
             <div>
               <p className="text-base font-semibold text-primary">日均支出周期</p>
-              <p className="mt-1 text-xs text-secondary">用于计算不用上班天数</p>
             </div>
           </div>
           <select
@@ -1029,12 +871,30 @@ const Settings: React.FC<SettingsProps> = ({
         </div>
       </section>
 
-      <div className="mt-6 text-center">
-        <p className="text-xs uppercase tracking-widest text-zinc-300">记账 v2.0</p>
-      </div>
+
+            </div>
+          </SettingsPanel>
+          {isAndroidNative && <button type="button" onClick={requestUpdateCheck} className="flex w-full items-center justify-between gap-3 px-5 py-4 text-left">
+            <span className="text-sm font-semibold text-primary">检查更新</span><ChevronRight className="h-4 w-4 text-secondary" />
+          </button>}
+        </div>
+      </section>
     </div>
   );
 };
+
+const SettingsPanel = ({ id, title, value, open, onToggle, children }: {
+  id: string; title: string; value?: string; open: boolean;
+  onToggle: (id: string) => void; children: React.ReactNode;
+}) => (
+  <div>
+    <button type="button" aria-expanded={open} aria-controls={`settings-${id}`} onClick={() => onToggle(id)} className="flex w-full items-center justify-between gap-3 px-5 py-4 text-left transition-colors hover:bg-surface/40">
+      <span className="text-sm font-semibold text-primary">{title}</span>
+      <span className="flex items-center gap-2 text-xs text-secondary">{value}{open ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}</span>
+    </button>
+    {open && <div id={`settings-${id}`} className="space-y-4 border-t border-border px-4 py-4">{children}</div>}
+  </div>
+);
 
 const SectionHeader = ({
   title,
@@ -1071,53 +931,11 @@ const InlineBadge = ({
   return <span className={`rounded-full border px-3 py-1.5 text-xs font-medium ${toneClass}`}>{children}</span>;
 };
 
-const PrimaryActionButton = ({
-  children,
-  onClick,
-  disabled,
-  icon: Icon,
-  tone,
-}: {
-  children: React.ReactNode;
-  onClick: () => void;
-  disabled?: boolean;
-  icon: React.ComponentType<any>;
-  tone: 'primary' | 'dark' | 'ghost';
-}) => {
-  const toneClass =
-    tone === 'primary'
-      ? 'bg-primary text-white hover:bg-zinc-800'
-      : tone === 'dark'
-        ? 'bg-zinc-900 text-white hover:bg-black'
-        : 'bg-zinc-100 text-primary hover:bg-zinc-200';
-
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      className={`inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:bg-zinc-200 disabled:text-zinc-400 ${toneClass}`}
-    >
-      <Icon className="w-4 h-4" />
-      {children}
-    </button>
-  );
-};
-
 const ConfigField = ({ label, children }: { label: string; children: React.ReactNode }) => (
   <label className="block">
     <span className="mb-2 block text-xs font-semibold uppercase tracking-wider text-secondary">{label}</span>
     {children}
   </label>
-);
-
-const StatusCard = ({ icon: Icon, label, value }: { icon: React.ComponentType<any>; label: string; value: string }) => (
-  <div className="rounded-3xl border border-border bg-surface/40 p-4">
-    <div className="mb-2 flex items-center gap-2 text-secondary">
-      <Icon className="w-4 h-4" />
-      <span className="text-xs uppercase tracking-wider">{label}</span>
-    </div>
-    <p className="text-sm font-semibold text-primary break-words">{value}</p>
-  </div>
 );
 
 const CaptureLogStatusBadge = ({ status }: { status: CaptureAttemptLog['status'] }) => {

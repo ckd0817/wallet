@@ -5,7 +5,7 @@ import { Cloud, getCloudStatus, cloudStatusText, type CloudStatus } from '../ser
 import { buildBackupPayload } from '../services/dataBackup';
 
 const inputClass='w-full rounded-xl border border-border bg-surface px-4 py-3 text-sm outline-none focus:border-primary';
-export default function CloudAccount() {
+export default function CloudAccount({ embedded = false }: { embedded?: boolean }) {
   const [status,setStatus]=useState<CloudStatus|null>(null);
   const [mode,setMode]=useState<'login'|'register'|'password'>('login');
   const [expanded,setExpanded]=useState(false);
@@ -40,8 +40,8 @@ export default function CloudAccount() {
     setPassword('');setNextPassword('');setExpanded(false);
   });
   return <section>
-    <h2 className="mb-4 px-1 text-lg font-bold text-primary">云端账户</h2>
-    <div className="rounded-[28px] border border-border bg-white p-5 shadow-sm sm:p-6">
+    {!embedded && <h2 className="mb-4 px-1 text-lg font-bold text-primary">云端账户</h2>}
+    <div className={embedded ? 'py-1' : 'rounded-[28px] border border-border bg-white p-5 shadow-sm sm:p-6'}>
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <CloudIcon className="h-5 w-5 text-secondary"/>
