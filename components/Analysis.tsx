@@ -164,10 +164,13 @@ const Analysis: React.FC<AnalysisProps> = ({
     const rate = positionConversionRate(holding);
     return rate > 0 ? formatAssetMoney(amount * rate, 'CNY') : '暂无';
   };
-  const formatPositionProfit = (amount: number, holding: AssetHolding, profitRate: number) => {
+  const formatPositionProfit = (amount: number, holding: AssetHolding) => {
     const rate = positionConversionRate(holding);
-    return rate > 0 ? `${formatSignedAssetMoney(amount * rate, 'CNY')} / ${profitRate.toFixed(1)}%` : '汇率暂不可用';
+    return rate > 0 ? formatSignedAssetMoney(amount * rate, 'CNY') : '暂无';
   };
+  const formatCostPrice = (holding: AssetHolding) => (
+    holding.shares > 0 ? formatAssetMoney(holding.costAmount / holding.shares, getAssetCurrency(holding), 4) : '暂无'
+  );
   const lastWeekEnd = getLastCompletedWeekEnd();
   const displayPerformanceHistory = useMemo(
     () => aggregateWeeklyPerformanceHistory(assetPerformanceHistory, lastWeekEnd),
@@ -544,31 +547,29 @@ const Analysis: React.FC<AnalysisProps> = ({
               onClick={() => openEditForm(position.holding)}
               className="w-full rounded-xl border border-border bg-white p-4 text-left"
             >
-              <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 mb-3">
-                <div className="min-w-0">
-                  <p className="line-clamp-2 text-[15px] font-semibold leading-5 text-primary">
-                    {getAssetDisplayName(position.holding, position.quote)}
-                  </p>
-                  <p className="text-xs text-secondary mt-1">
-                    {formatAssetKind(position.holding)}{getAssetCurrency(position.holding) === 'USD' ? '' : ` · ${position.holding.code}`}
-                  </p>
-                </div>
-                <div className="text-right whitespace-nowrap">
-                  <p className="text-[15px] font-semibold text-primary">{formatPositionMoney(position.marketValue, position.holding)}</p>
-                  <p className={`text-xs ${position.profit >= 0 ? 'text-danger' : 'text-success'}`}>
-                    {formatPositionProfit(position.profit, position.holding, position.profitRate)}
-                  </p>
-                </div>
-              </div>
-              <div className="grid grid-cols-3 gap-2 text-[11px]">
-                <Meta label="份额" value={position.holding.shares.toFixed(2)} />
-                <Meta label="总成本" value={formatPositionMoney(position.holding.costAmount, position.holding)} />
-                <Meta
+              <p className="line-clamp-2 text-[15px] font-semibold leading-5 text-primary">
+                {getAssetDisplayName(position.holding, position.quote)}
+              </p>
+              <p className="text-xs text-secondary mt-1">
+                {formatAssetKind(position.holding)}{getAssetCurrency(position.holding) === 'USD' ? '' : ` · ${position.holding.code}`}
+              </p>
+              <div className="grid grid-cols-[1.2fr_1.2fr_1fr] gap-2 mt-4">
+                <PositionStat label="市值" value={formatPositionMoney(position.marketValue, position.holding)} />
+                <PositionStat
+                  label="持有收益"
+                  value={position.quote ? formatPositionProfit(position.profit, position.holding) : '暂无'}
+                  tone={position.quote ? (position.profit < 0 ? 'negative' : 'positive') : undefined}
+                />
+                <PositionStat
                   label="收益率"
                   value={position.quote ? formatSignedPercent(position.profitRate) : '暂无'}
-                  tone={position.profit < 0 ? 'negative' : 'positive'}
+                  tone={position.quote ? (position.profit < 0 ? 'negative' : 'positive') : undefined}
+                  align="right"
                 />
               </div>
+              <p className="text-[11px] text-zinc-400 mt-3">
+                {position.holding.shares.toFixed(2)}份 · 成本价 {formatCostPrice(position.holding)}
+              </p>
               {position.quote?.error && <p className="text-xs text-danger mt-3">{position.quote.error}</p>}
             </button>
           ))}
@@ -796,6 +797,13 @@ const AssetActionButton = ({
     <Icon className={`h-4 w-4 shrink-0 ${active ? 'animate-spin' : ''}`} />
     <span className="truncate">{label}</span>
   </button>
+);
+
+const PositionStat = ({ label, value, tone, align }: { label: string; value: string; tone?: 'positive' | 'negative'; align?: 'right' }) => (
+  <div className={`min-w-0 ${align === 'right' ? 'text-right' : ''}`}>
+    <p className="text-[11px] text-zinc-400 mb-1">{label}</p>
+    <p className={`truncate text-[15px] font-semibold tabular-nums ${tone === 'positive' ? 'text-danger' : tone === 'negative' ? 'text-success' : 'text-primary'}`}>{value}</p>
+  </div>
 );
 
 const Meta = ({ label, value, tone }: { label: string; value: string; tone?: 'positive' | 'negative' }) => (
