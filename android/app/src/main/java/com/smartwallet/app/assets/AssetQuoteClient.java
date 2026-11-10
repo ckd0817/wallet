@@ -97,6 +97,342 @@ public class AssetQuoteClient {
         return quotes;
     }
 
+    public JSONArray syncWeekly(JSONArray holdings, String fundQuoteSource, String weekEnd) {
+        JSONArray quotes = new JSONArray();
+        if (weekEnd == null || !weekEnd.matches("\\d{4}-\\d{2}-\\d{2}")) {
+            return quotes;
+        }
+        String startDate = shiftDate(weekEnd, -40);
+        String previousWeekEnd = shiftDate(weekEnd, -7);
+        if (startDate.isEmpty() || previousWeekEnd.isEmpty()) {
+            return quotes;
+        }
+
+        boolean hasUsdHolding = false;
+        if (holdings != null) {
+            for (int index = 0; index < holdings.length(); index++) {
+                JSONObject holding = holdings.optJSONObject(index);
+                if (holding == null) {
+                    continue;
+                }
+                String assetType = holding.optString("assetType", "");
+                String rawCode = holding.optString("code", "");
+                String market = holding.optString("market", "");
+                boolean isUs = "us".equals(market) || rawCode.matches(".*[A-Za-z].*");
+                hasUsdHolding = hasUsdHolding || isUs;
+                String code = isUs ? normalizeUsCode(rawCode) : normalizeCode(rawCode);
+                if (code.isEmpty()) {
+                    continue;
+                }
+
+                JSONObject quote;
+                if ("fund".equals(assetType)) {
+                    quote = fetchFundWeeklyQuote(code, holding.optString("name", ""), normalizeFundQuoteSource(fundQuoteSource), startDate, weekEnd, previousWeekEnd);
+                } else if (isUs) {
+                    quote = fetchKlineWeeklyQuote("us" + code, "us", code, startDate, weekEnd, previousWeekEnd);
+                } else {
+                    String stockMarket = market.isEmpty() ? inferStockMarket(code) : market;
+                    stockMarket = "sh".equals(stockMarket) ? "sh" : "sz";
+                    quote = fetchKlineWeeklyQuote(stockMarket + code, stockMarket, code, startDate, weekEnd, previousWeekEnd);
+                }
+                if (quote != null) {
+                    safePut(quote, "periodEnd", weekEnd);
+                    quotes.put(quote);
+                }
+            }
+        }
+
+        JSONObject benchmark = fetchKlineWeeklyQuote("sh000001", "sh", "000001", startDate, weekEnd, previousWeekEnd);
+        if (benchmark != null) {
+            safePut(benchmark, "periodEnd", weekEnd);
+            quotes.put(benchmark);
+        }
+
+        if (hasUsdHolding) {
+            JSONObject exchangeRate = fetchUsdCnyRateOn(weekEnd);
+            if (exchangeRate == null) {
+                exchangeRate = fetchUsdCnyRate();
+            }
+            if (exchangeRate != null) {
+                safePut(exchangeRate, "periodEnd", weekEnd);
+                quotes.put(exchangeRate);
+            }
+        }
+
+        return quotes;
+    }
+
+    public String parseTencentKlineFullSymbol(String content, String symbol) {
+        try {
+            JSONObject data = new JSONObject(content == null ? "" : content.trim()).optJSONObject("data");
+            JSONObject item = data == null ? null : data.optJSONObject(symbol);
+            JSONObject qt = item == null ? null : item.optJSONObject("qt");
+            JSONArray fields = qt == null ? null : qt.optJSONArray(symbol);
+            String fullCode = fields == null ? "" : fields.optString(2, "");
+            return fullCode.isEmpty() ? "" : "us" + fullCode;
+        } catch (Exception ignored) {
+            return "";
+        }
+    }
+
+    public JSONObject parseTencentKlineWeeklyQuote(
+        String content,
+        String symbol,
+        String market,
+        String code,
+        String weekEnd,
+        String previousWeekEnd,
+        String syncedAt
+    ) {
+        try {
+            JSONObject data = new JSONObject(content == null ? "" : content.trim()).optJSONObject("data");
+            JSONObject item = data == null ? null : data.optJSONObject(symbol);
+            if (item == null) {
+                return null;
+            }
+            JSONArray rows = item.optJSONArray("day");
+            if (rows == null || rows.length() == 0) {
+                rows = item.optJSONArray("qfqday");
+            }
+            if (rows == null || rows.length() == 0) {
+                return null;
+            }
+            String latestDate = "";
+            double latestClose = 0d;
+            double previousClose = 0d;
+            for (int index = 0; index < rows.length(); index++) {
+                JSONArray row = rows.optJSONArray(index);
+                if (row == null || row.length() < 3) {
+                    continue;
+                }
+                String date = row.optString(0, "");
+                double close = parseDouble(row.optString(2, ""));
+                if (close <= 0 || date.compareTo(weekEnd) > 0) {
+                    continue;
+                }
+                if (date.compareTo(latestDate) >= 0) {
+                    latestDate = date;
+                    latestClose = close;
+                }
+                if (date.compareTo(previousWeekEnd) <= 0) {
+                    previousClose = close;
+                }
+            }
+            if (latestClose <= 0) {
+                return null;
+            }
+            JSONObject qt = item.optJSONObject("qt");
+            JSONArray fields = qt == null ? null : qt.optJSONArray(symbol);
+            String name = fields == null ? "" : fields.optString(1, "");
+            boolean isIndex = ("sh".equals(market) && "000001".equals(code)) ||
+                ("us".equals(market) && ("INX".equals(code) || "IXIC".equals(code) || "DJI".equals(code)));
+            JSONObject quote = new JSONObject();
+            safePut(quote, "assetType", isIndex ? "index" : "stock");
+            safePut(quote, "code", code);
+            safePut(quote, "name", name);
+            safePut(quote, "price", latestClose);
+            safePut(quote, "changePercent", previousClose > 0 ? (latestClose - previousClose) / previousClose * 100d : 0d);
+            safePut(quote, "quoteTime", latestDate);
+            safePut(quote, "source", isIndex ? "tencent-index-" + market : "tencent-" + market);
+            safePut(quote, "syncedAt", syncedAt);
+            safePut(quote, "currency", "us".equals(market) ? "USD" : "CNY");
+            return quote;
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    public JSONObject parseEastmoneyFundWeeklyQuote(
+        String content,
+        String code,
+        String name,
+        String weekEnd,
+        String previousWeekEnd,
+        String syncedAt
+    ) {
+        try {
+            JSONObject payload = new JSONObject(content == null ? "" : content.trim());
+            if (payload.optInt("ErrCode", -1) != 0) {
+                return null;
+            }
+            JSONObject data = payload.optJSONObject("Data");
+            JSONArray rows = data == null ? null : data.optJSONArray("LSJZList");
+            return weeklyFundQuote(rows, "FSRQ", "DWJZ", code, name, weekEnd, previousWeekEnd, "eastmoney-f10", syncedAt);
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    public JSONObject parseSinaFundWeeklyQuote(
+        String content,
+        String code,
+        String name,
+        String weekEnd,
+        String previousWeekEnd,
+        String syncedAt
+    ) {
+        try {
+            JSONObject payload = new JSONObject(content == null ? "" : content.trim());
+            JSONObject result = payload.optJSONObject("result");
+            JSONObject status = result == null ? null : result.optJSONObject("status");
+            JSONObject data = result == null ? null : result.optJSONObject("data");
+            JSONArray rows = data == null ? null : data.optJSONArray("data");
+            if (status == null || status.optInt("code", -1) != 0) {
+                return null;
+            }
+            return weeklyFundQuote(rows, "fbrq", "jjjz", code, name, weekEnd, previousWeekEnd, "sina-fund", syncedAt);
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private JSONObject weeklyFundQuote(
+        JSONArray rows,
+        String dateKey,
+        String priceKey,
+        String code,
+        String name,
+        String weekEnd,
+        String previousWeekEnd,
+        String source,
+        String syncedAt
+    ) {
+        if (rows == null) {
+            return null;
+        }
+        String latestDate = "";
+        double latestPrice = 0d;
+        String previousDate = "";
+        double previousPrice = 0d;
+        for (int index = 0; index < rows.length(); index++) {
+            JSONObject row = rows.optJSONObject(index);
+            if (row == null) {
+                continue;
+            }
+            String date = normalizeDate(row.optString(dateKey, "").split(" ")[0]);
+            double price = parseDouble(row.optString(priceKey, ""));
+            if (price <= 0 || date.isEmpty() || date.compareTo(weekEnd) > 0) {
+                continue;
+            }
+            if (date.compareTo(latestDate) > 0) {
+                latestDate = date;
+                latestPrice = price;
+            }
+            if (date.compareTo(previousWeekEnd) <= 0 && date.compareTo(previousDate) > 0) {
+                previousDate = date;
+                previousPrice = price;
+            }
+        }
+        double changePercent = previousPrice > 0 ? (latestPrice - previousPrice) / previousPrice * 100d : 0d;
+        return confirmedFundQuote(code, name, latestPrice, changePercent, latestDate, source, syncedAt);
+    }
+
+    private JSONObject fetchKlineWeeklyQuote(
+        String symbol,
+        String market,
+        String code,
+        String startDate,
+        String weekEnd,
+        String previousWeekEnd
+    ) {
+        try {
+            String content = requestKline(symbol, startDate, weekEnd);
+            JSONObject quote = parseTencentKlineWeeklyQuote(content, symbol, market, code, weekEnd, previousWeekEnd, nowIsoString());
+            if (quote == null && "us".equals(market)) {
+                String fullSymbol = parseTencentKlineFullSymbol(content, symbol);
+                if (!fullSymbol.isEmpty() && !fullSymbol.equals(symbol)) {
+                    content = requestKline(fullSymbol, startDate, weekEnd);
+                    quote = parseTencentKlineWeeklyQuote(content, fullSymbol, market, code, weekEnd, previousWeekEnd, nowIsoString());
+                }
+            }
+            if (quote == null) {
+                Log.w(TAG, "Invalid weekly quote response: symbol=" + symbol);
+            }
+            return quote;
+        } catch (Exception exception) {
+            Log.w(TAG, "Weekly quote request failed: symbol=" + symbol, exception);
+            return null;
+        }
+    }
+
+    private String requestKline(String symbol, String startDate, String endDate) throws Exception {
+        return request(
+            "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=" + symbol + ",day," + startDate + "," + endDate + ",40,",
+            StandardCharsets.UTF_8,
+            "https://gu.qq.com/"
+        );
+    }
+
+    private JSONObject fetchFundWeeklyQuote(
+        String code,
+        String name,
+        String source,
+        String startDate,
+        String weekEnd,
+        String previousWeekEnd
+    ) {
+        try {
+            String syncedAt = nowIsoString();
+            JSONObject quote;
+            if (SOURCE_SINA.equals(source)) {
+                String content = request(
+                    "https://stock.finance.sina.com.cn/fundInfo/api/openapi.php/CaihuiFundInfoService.getNav?symbol=" + code +
+                        "&datefrom=" + startDate + "&dateto=" + weekEnd + "&page=1&num=40",
+                    StandardCharsets.UTF_8,
+                    "https://finance.sina.com.cn/"
+                );
+                quote = parseSinaFundWeeklyQuote(content, code, name, weekEnd, previousWeekEnd, syncedAt);
+            } else {
+                String content = request(
+                    "https://api.fund.eastmoney.com/f10/lsjz?fundCode=" + code + "&pageIndex=1&pageSize=40&startDate=" + startDate + "&endDate=" + weekEnd,
+                    StandardCharsets.UTF_8,
+                    "https://fund.eastmoney.com/"
+                );
+                quote = parseEastmoneyFundWeeklyQuote(content, code, name, weekEnd, previousWeekEnd, syncedAt);
+            }
+            if (quote == null) {
+                Log.w(TAG, "Invalid weekly fund response: source=" + source + ", code=" + code);
+            }
+            return quote;
+        } catch (Exception exception) {
+            Log.w(TAG, "Weekly fund request failed: source=" + source + ", code=" + code, exception);
+            return null;
+        }
+    }
+
+    private JSONObject fetchUsdCnyRateOn(String date) {
+        try {
+            String content = request(
+                "https://api.frankfurter.dev/v2/rate/USD/CNY?date=" + date,
+                StandardCharsets.UTF_8,
+                null
+            );
+            JSONObject quote = parseUsdCnyRate(content, nowIsoString());
+            if (quote != null) {
+                safePut(quote, "source", "frankfurter");
+            }
+            return quote;
+        } catch (Exception exception) {
+            Log.w(TAG, "Weekly exchange rate request failed", exception);
+            return null;
+        }
+    }
+
+    private String shiftDate(String date, int days) {
+        try {
+            SimpleDateFormat formatter = new SimpleDateFormat("yyyy-MM-dd", Locale.US);
+            formatter.setTimeZone(TimeZone.getTimeZone("UTC"));
+            formatter.setLenient(false);
+            Date parsed = formatter.parse(date);
+            if (parsed == null) {
+                return "";
+            }
+            return formatter.format(new Date(parsed.getTime() + days * 86400000L));
+        } catch (Exception ignored) {
+            return "";
+        }
+    }
+
     public JSONObject parseUsdCnyRate(String content, String syncedAt) {
         try {
             JSONObject payload = new JSONObject(content == null ? "" : content.trim());

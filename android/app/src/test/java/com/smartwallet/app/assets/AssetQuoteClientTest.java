@@ -144,4 +144,69 @@ public class AssetQuoteClientTest {
         AssetQuoteClient client = new AssetQuoteClient();
         assertTrue(client.parseFundQuote("bad response", "2026-06-18T08:00:00.000Z") == null);
     }
+
+    @Test
+    public void parsesTencentKlineWeeklyQuote() {
+        AssetQuoteClient client = new AssetQuoteClient();
+        JSONObject quote = client.parseTencentKlineWeeklyQuote(
+            "{\"code\":0,\"data\":{\"sh000001\":{\"day\":[[\"2026-10-29\",\"1\",\"3900.00\",\"1\",\"1\",\"1\"],[\"2026-10-30\",\"1\",\"4000.00\",\"1\",\"1\",\"1\"],[\"2026-11-06\",\"1\",\"4100.00\",\"1\",\"1\",\"1\"],[\"2026-11-09\",\"1\",\"5000.00\",\"1\",\"1\",\"1\"]],\"qt\":{\"sh000001\":[\"1\",\"上证指数\",\"000001\"]}}}}",
+            "sh000001",
+            "sh",
+            "000001",
+            "2026-11-06",
+            "2026-10-30",
+            "2026-11-10T08:00:00.000Z"
+        );
+
+        assertNotNull(quote);
+        assertEquals("index", quote.optString("assetType"));
+        assertEquals(4100d, quote.optDouble("price"), 0.0001d);
+        assertEquals(2.5d, quote.optDouble("changePercent"), 0.0001d);
+        assertEquals("2026-11-06", quote.optString("quoteTime"));
+        assertEquals("上证指数", quote.optString("name"));
+    }
+
+    @Test
+    public void resolvesTencentUsKlineSymbol() {
+        AssetQuoteClient client = new AssetQuoteClient();
+        String content = "{\"code\":0,\"data\":{\"usBRK.B\":{\"day\":[],\"qt\":{\"usBRK.B\":[\"200\",\"伯克希尔B\",\"BRK.B.N\"]}}}}";
+
+        assertTrue(client.parseTencentKlineWeeklyQuote(content, "usBRK.B", "us", "BRK.B", "2026-11-06", "2026-10-30", "") == null);
+        assertEquals("usBRK.B.N", client.parseTencentKlineFullSymbol(content, "usBRK.B"));
+    }
+
+    @Test
+    public void parsesEastmoneyFundWeeklyQuote() {
+        AssetQuoteClient client = new AssetQuoteClient();
+        JSONObject quote = client.parseEastmoneyFundWeeklyQuote(
+            "{\"Data\":{\"LSJZList\":[{\"FSRQ\":\"2026-11-06\",\"DWJZ\":\"1.1000\"},{\"FSRQ\":\"2026-11-05\",\"DWJZ\":\"1.0800\"},{\"FSRQ\":\"2026-10-30\",\"DWJZ\":\"1.0000\"}]},\"ErrCode\":0}",
+            "004388",
+            "鹏华丰享债券",
+            "2026-11-06",
+            "2026-10-30",
+            "2026-11-10T08:00:00.000Z"
+        );
+
+        assertNotNull(quote);
+        assertEquals(1.1d, quote.optDouble("price"), 0.0001d);
+        assertEquals(10d, quote.optDouble("changePercent"), 0.0001d);
+        assertEquals("2026-11-06", quote.optString("confirmedDate"));
+    }
+
+    @Test
+    public void parsesSinaFundWeeklyQuote() {
+        AssetQuoteClient client = new AssetQuoteClient();
+        JSONObject quote = client.parseSinaFundWeeklyQuote(
+            "{\"result\":{\"status\":{\"code\":0},\"data\":{\"data\":[{\"fbrq\":\"2026-11-06 00:00:00\",\"jjjz\":\"1.1000\"},{\"fbrq\":\"2026-10-29 00:00:00\",\"jjjz\":\"1.0000\"}]}}}",
+            "004388",
+            "鹏华丰享债券",
+            "2026-11-06",
+            "2026-10-30",
+            "2026-11-10T08:00:00.000Z"
+        );
+
+        assertNotNull(quote);
+        assertEquals(1.1d, quote.optDouble("price"), 0.0001d);
+        assertEquals(10d, quote.optDouble("changePercent"), 0.0001d);
+    }
 }

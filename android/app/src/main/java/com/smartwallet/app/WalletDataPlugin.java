@@ -172,12 +172,30 @@ public class WalletDataPlugin extends Plugin {
             assetHoldings == null ? new JSArray() : assetHoldings,
             fundQuoteSource
         );
-        repository(call).replaceAssetQuoteCache(quotes);
         JSObject result = new JSObject();
         result.put("quotes", quotes);
         call.resolve(result);
         } catch (Exception exception) {
             call.reject(exception.getMessage() == null ? "数据保存失败" : exception.getMessage());
+        }
+    }
+
+    @PluginMethod
+    public void syncWeeklyAssetQuotes(PluginCall call) {
+        try {
+        JSArray assetHoldings = call.getArray("assetHoldings");
+        String fundQuoteSource = call.getString("fundQuoteSource", AssetQuoteClient.SOURCE_EASTMONEY);
+        String weekEnd = call.getString("weekEnd", "");
+        JSONArray quotes = new AssetQuoteClient().syncWeekly(
+            assetHoldings == null ? new JSArray() : assetHoldings,
+            fundQuoteSource,
+            weekEnd
+        );
+        JSObject result = new JSObject();
+        result.put("quotes", quotes);
+        call.resolve(result);
+        } catch (Exception exception) {
+            call.reject(exception.getMessage() == null ? "行情同步失败" : exception.getMessage());
         }
     }
 

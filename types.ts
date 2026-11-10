@@ -104,6 +104,7 @@ export interface AssetQuote {
   estimatedPrice?: number;
   confirmedPrice?: number;
   confirmedDate?: string;
+  periodEnd?: string;
   error?: string;
 }
 
@@ -146,6 +147,7 @@ export interface AssetPerformanceSnapshot {
   benchmarkName: string;
   benchmarkChangePercent: number;
   capturedAt: string;
+  period?: 'week';
 }
 
 export interface AssetTradeRecord {

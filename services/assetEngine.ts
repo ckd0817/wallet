@@ -224,6 +224,7 @@ export const normalizeAssetQuote = (quote: Partial<AssetQuote>): AssetQuote | nu
         ? Math.max(0, quote.confirmedPrice)
         : undefined,
     confirmedDate: typeof quote.confirmedDate === 'string' && quote.confirmedDate ? quote.confirmedDate : undefined,
+    periodEnd: typeof quote.periodEnd === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(quote.periodEnd) ? quote.periodEnd : undefined,
     error: typeof quote.error === 'string' && quote.error ? quote.error : undefined,
   };
 };
@@ -313,6 +314,7 @@ export const normalizeAssetPerformanceSnapshot = (
         ? snapshot.benchmarkChangePercent
         : 0,
     capturedAt: typeof snapshot.capturedAt === 'string' && snapshot.capturedAt ? snapshot.capturedAt : `${date}T00:00:00.000Z`,
+    ...(snapshot.period === 'week' ? { period: 'week' as const } : {}),
   };
 };
 
@@ -673,6 +675,121 @@ export const mergeAssetPerformanceHistory = (
   return Array.from(merged.values())
     .sort((left, right) => left.date.localeCompare(right.date))
     .slice(-maxDays);
+};
+
+const toLocalDateKey = (date: Date) =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+
+const parseLocalDateKey = (dateKey: string) => {
+  const [year, month, day] = dateKey.split('-').map(Number);
+  return new Date(year, month - 1, day);
+};
+
+export const getLastCompletedWeekEnd = (today = new Date()) => {
+  const date = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const offset = (date.getDay() + 2) % 7 || 7;
+  date.setDate(date.getDate() - offset);
+  return toLocalDateKey(date);
+};
+
+export const getWeekEndKey = (dateKey: string) => {
+  const date = parseLocalDateKey(dateKey);
+  date.setDate(date.getDate() - ((date.getDay() + 6) % 7) + 4);
+  return toLocalDateKey(date);
+};
+
+const quoteKey = (quote: Pick<AssetQuote, 'assetType' | 'code'>) => `${quote.assetType}:${quote.code}`;
+
+export const isAssetQuoteCacheCurrent = (holdings: AssetHolding[], quotes: AssetQuote[], weekEnd: string) => {
+  const quoteMap = new Map(quotes.map((quote) => [quoteKey(quote), quote]));
+  const benchmark = quoteMap.get('index:000001');
+  return (
+    benchmark?.periodEnd === weekEnd &&
+    holdings.every((holding) => quoteMap.get(quoteKey(holding))?.periodEnd === weekEnd) &&
+    (!holdings.some((holding) => getAssetCurrency(holding) === 'USD') || quoteMap.get('index:USDCNY')?.periodEnd === weekEnd)
+  );
+};
+
+export const mergeWeeklyAssetQuotes = (cache: AssetQuote[], weeklyQuotes: AssetQuote[], weekEnd: string) => {
+  const quoteMap = new Map<string, AssetQuote>(
+    cache.map((quote) => [quoteKey(quote), quote.periodEnd === weekEnd ? quote : { ...quote, changePercent: 0 }]),
+  );
+  weeklyQuotes
+    .filter((quote) => quote.periodEnd === weekEnd && !quote.error)
+    .forEach((quote) => {
+      quoteMap.set(quoteKey(quote), quote);
+    });
+  return Array.from(quoteMap.values());
+};
+
+export const buildWeeklyPerformanceSnapshot = (
+  positions: AssetPositionView[],
+  benchmarkQuote: AssetQuote | undefined,
+  weekEnd: string,
+  capturedAt = new Date().toISOString(),
+): AssetPerformanceSnapshot | null => {
+  if (
+    positions.length === 0 ||
+    !benchmarkQuote ||
+    benchmarkQuote.periodEnd !== weekEnd ||
+    positions.some((position) => position.quote?.periodEnd !== weekEnd)
+  ) {
+    return null;
+  }
+
+  const summary = buildAssetSummary(positions);
+  const baseValue = summary.totalMarketValue - summary.dailyChangeAmount;
+  return {
+    date: weekEnd,
+    marketValue: summary.totalMarketValue,
+    costAmount: summary.totalCost,
+    totalProfit: summary.totalProfit,
+    totalProfitRate: summary.totalProfitRate,
+    dailyProfit: summary.dailyChangeAmount,
+    dailyProfitRate: baseValue > 0 ? (summary.dailyChangeAmount / baseValue) * 100 : 0,
+    benchmarkName: benchmarkQuote.name,
+    benchmarkChangePercent: benchmarkQuote.changePercent,
+    capturedAt,
+    period: 'week',
+  };
+};
+
+export const aggregateWeeklyPerformanceHistory = (
+  history: AssetPerformanceSnapshot[] = [],
+  lastWeekEnd = getLastCompletedWeekEnd(),
+): AssetPerformanceSnapshot[] => {
+  const groups = new Map<string, AssetPerformanceSnapshot[]>();
+  history
+    .map((item) => normalizeAssetPerformanceSnapshot(item))
+    .filter((item): item is AssetPerformanceSnapshot => Boolean(item))
+    .sort((left, right) => left.date.localeCompare(right.date))
+    .forEach((item) => {
+      const weekEnd = getWeekEndKey(item.date);
+      if (weekEnd > lastWeekEnd) {
+        return;
+      }
+      groups.set(weekEnd, [...(groups.get(weekEnd) ?? []), item]);
+    });
+
+  return Array.from(groups.entries())
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([weekEnd, items]) => {
+      const weekly = items.filter((item) => item.period === 'week').at(-1);
+      if (weekly) {
+        return { ...weekly, date: weekEnd };
+      }
+      const latest = items[items.length - 1];
+      const profitMultiplier = items.reduce((value, item) => value * (1 + item.dailyProfitRate / 100), 1);
+      const benchmarkMultiplier = items.reduce((value, item) => value * (1 + item.benchmarkChangePercent / 100), 1);
+      return {
+        ...latest,
+        date: weekEnd,
+        dailyProfit: items.reduce((sum, item) => sum + item.dailyProfit, 0),
+        dailyProfitRate: (profitMultiplier - 1) * 100,
+        benchmarkChangePercent: (benchmarkMultiplier - 1) * 100,
+        period: 'week' as const,
+      };
+    });
 };
 
 export const getAssetDisplayName = (

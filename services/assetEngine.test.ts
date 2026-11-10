@@ -23,6 +23,14 @@ import {
   parseUsdCnyRateResponse,
   resolveAssetTotalCost,
 } from './assetEngine';
+import {
+  aggregateWeeklyPerformanceHistory,
+  buildWeeklyPerformanceSnapshot,
+  getLastCompletedWeekEnd,
+  getWeekEndKey,
+  isAssetQuoteCacheCurrent,
+  mergeWeeklyAssetQuotes,
+} from './assetEngine';
 import { normalizeSnapshot } from './walletStore';
 
 describe('assetEngine', () => {
@@ -636,5 +644,98 @@ describe('isLikelyMarketOpenForHolding', () => {
   it('QDII 周末优先级高于 daysLag 判断', () => {
     // 即使 quoteDate=today（理论上更新过），周六仍然跳过
     expect(isLikelyMarketOpenForHolding('2026-07-04', quoteAt('2026-07-04 04:00'), qdiiHolding)).toBe(false);
+  });
+});
+
+describe('weekly asset data', () => {
+  const holding = {
+    id: 'h1',
+    assetType: 'fund' as const,
+    code: '004388',
+    market: 'fund' as const,
+    name: '鹏华丰享债券',
+    shares: 100,
+    costAmount: 100,
+    createdAt: '2026-11-01T00:00:00.000Z',
+    updatedAt: '2026-11-01T00:00:00.000Z',
+  };
+  const weeklyQuote = (code: string, assetType: 'fund' | 'index', price: number, changePercent: number, periodEnd = '2026-11-06') => ({
+    assetType,
+    code,
+    name: assetType === 'index' ? '上证指数' : '鹏华丰享债券',
+    price,
+    changePercent,
+    quoteTime: '2026-11-06',
+    source: 'test',
+    syncedAt: '2026-11-08T00:00:00.000Z',
+    currency: 'CNY' as const,
+    periodEnd,
+  });
+
+  it('取上一个完整交易周的周五', () => {
+    expect(getLastCompletedWeekEnd(new Date(2026, 10, 10))).toBe('2026-11-06');
+    expect(getLastCompletedWeekEnd(new Date(2026, 10, 7))).toBe('2026-11-06');
+    expect(getLastCompletedWeekEnd(new Date(2026, 10, 6))).toBe('2026-10-30');
+    expect(getLastCompletedWeekEnd(new Date(2026, 10, 9))).toBe('2026-11-06');
+    expect(getWeekEndKey('2026-11-02')).toBe('2026-11-06');
+    expect(getWeekEndKey('2026-11-08')).toBe('2026-11-06');
+  });
+
+  it('缓存只在本周数据齐全时有效', () => {
+    const quotes = [weeklyQuote('004388', 'fund', 1.1, 10), weeklyQuote('000001', 'index', 4100, 2.5)];
+    expect(isAssetQuoteCacheCurrent([holding], quotes, '2026-11-06')).toBe(true);
+    expect(isAssetQuoteCacheCurrent([holding], quotes, '2026-11-13')).toBe(false);
+    expect(isAssetQuoteCacheCurrent([holding], [quotes[1]], '2026-11-06')).toBe(false);
+  });
+
+  it('旧缓存不再带涨跌幅', () => {
+    const merged = mergeWeeklyAssetQuotes(
+      [{ ...weeklyQuote('004388', 'fund', 1.2, 3), periodEnd: undefined }],
+      [weeklyQuote('000001', 'index', 4100, 2.5)],
+      '2026-11-06',
+    );
+    expect(merged.find((quote) => quote.code === '004388')?.changePercent).toBe(0);
+    expect(merged.find((quote) => quote.code === '000001')?.changePercent).toBe(2.5);
+  });
+
+  it('生成周收益快照', () => {
+    const quotes = [weeklyQuote('004388', 'fund', 1.1, 10), weeklyQuote('000001', 'index', 4100, 2.5)];
+    const snapshot = buildWeeklyPerformanceSnapshot(buildAssetPositions([holding], quotes), quotes[1], '2026-11-06', '2026-11-08T00:00:00.000Z');
+    expect(snapshot?.date).toBe('2026-11-06');
+    expect(snapshot?.period).toBe('week');
+    expect(snapshot?.dailyProfit).toBeCloseTo(10);
+    expect(snapshot?.dailyProfitRate).toBeCloseTo(10);
+    expect(snapshot?.benchmarkChangePercent).toBe(2.5);
+    expect(buildWeeklyPerformanceSnapshot(buildAssetPositions([holding], quotes), quotes[1], '2026-11-13')).toBeNull();
+  });
+
+  it('日历史按周合并，并隐藏未结束的周', () => {
+    const day = (date: string, dailyProfit: number, dailyProfitRate: number, benchmarkChangePercent: number) => ({
+      date,
+      marketValue: 1000,
+      costAmount: 900,
+      totalProfit: 100,
+      totalProfitRate: 11.1,
+      dailyProfit,
+      dailyProfitRate,
+      benchmarkName: '上证指数',
+      benchmarkChangePercent,
+      capturedAt: `${date}T08:00:00.000Z`,
+    });
+    const history = aggregateWeeklyPerformanceHistory(
+      [day('2026-11-02', 10, 1, 1), day('2026-11-03', 20, 1, -1), day('2026-11-09', 50, 5, 5)],
+      '2026-11-06',
+    );
+    expect(history).toHaveLength(1);
+    expect(history[0].date).toBe('2026-11-06');
+    expect(history[0].dailyProfit).toBe(30);
+    expect(history[0].dailyProfitRate).toBeCloseTo(2.01);
+    expect(history[0].benchmarkChangePercent).toBeCloseTo(-0.01);
+
+    const withWeekly = aggregateWeeklyPerformanceHistory(
+      [day('2026-11-02', 10, 1, 1), { ...day('2026-11-06', 99, 9, 2), period: 'week' as const }],
+      '2026-11-06',
+    );
+    expect(withWeekly[0].dailyProfit).toBe(99);
   });
 });

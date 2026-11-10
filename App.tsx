@@ -63,7 +63,9 @@ import {
   saveNativeAssetHolding,
   saveNativeAssetRecurringPlan,
   syncNativeAssetQuotes,
+  syncNativeWeeklyAssetQuotes,
   syncWebAssetQuotes,
+  syncWebWeeklyAssetQuotes,
   testNativeFundQuoteSource,
 } from './services/walletStore';
 import { mergeBackupData } from './services/dataBackup';
@@ -72,15 +74,18 @@ import { getNativeAccountId } from './services/nativeScope';
 import {
   advanceAssetRecurringPlanPastDate,
   applyAssetRecurringPurchaseWithQuote,
-  buildAssetPerformanceSnapshot,
   buildAssetPositions,
+  buildWeeklyPerformanceSnapshot,
   convertAssetPositionsToCny,
   getAssetCurrency,
   getAssetQuoteConfirmedDate,
+  getLastCompletedWeekEnd,
   getUsdCnyRate,
+  isAssetQuoteCacheCurrent,
   isDelayedSettlementFund,
   isLikelyMarketOpenForHolding,
   mergeAssetPerformanceHistory,
+  mergeWeeklyAssetQuotes,
 } from './services/assetEngine';
 
 const App: React.FC = () => {
@@ -329,15 +334,11 @@ const App: React.FC = () => {
       const holdings = snapshot.assetHoldings.map((holding) => ({ ...holding }));
       const plans = snapshot.assetRecurringPlans.map((plan) => ({ ...plan }));
       const tradeRecords = snapshot.assetTradeRecords.map((record) => ({ ...record }));
-      const quoteMap = new Map(snapshot.assetQuoteCache.map((quote) => [`${quote.assetType}:${quote.code}`, quote]));
       let hasUpdates = false;
       const fetchHoldingQuote = async (holding: AssetHolding) => {
         const quotes = runningInAndroid
           ? await syncNativeAssetQuotes([holding], snapshot.appSettings.fundQuoteSource)
           : await syncWebAssetQuotes([holding], snapshot.appSettings.fundQuoteSource);
-        quotes.forEach((quote) => {
-          quoteMap.set(`${quote.assetType}:${quote.code}`, quote);
-        });
         return quotes.find((item) => item.assetType === holding.assetType && item.code === holding.code) ?? null;
       };
 
@@ -547,7 +548,6 @@ const App: React.FC = () => {
           assetHoldings: holdings,
           assetRecurringPlans: plans,
           assetTradeRecords: tradeRecords,
-          assetQuoteCache: Array.from(quoteMap.values()),
         }),
         hasUpdates,
       };
@@ -1004,7 +1004,7 @@ const App: React.FC = () => {
   };
 
   const syncAssetQuotesForSnapshot = useCallback(
-    async (holdings: AssetHolding[], baseSnapshot: WalletSnapshot) => {
+    async (holdings: AssetHolding[], baseSnapshot: WalletSnapshot, force = false) => {
       if (baseSnapshot.assetHoldings.length === 0 || isSyncingAssets) {
         return;
       }
@@ -1013,48 +1013,58 @@ const App: React.FC = () => {
       try {
         const recurringResult = await processAssetRecurringPlans(baseSnapshot);
         const workingSnapshot = recurringResult.snapshot;
-        const quotes = runningInAndroid
-          ? await syncNativeAssetQuotes(workingSnapshot.assetHoldings, workingSnapshot.appSettings.fundQuoteSource)
-          : await syncWebAssetQuotes(workingSnapshot.assetHoldings, workingSnapshot.appSettings.fundQuoteSource);
-        const quoteMap = new Map<string, AssetQuote>(
-          workingSnapshot.assetQuoteCache.map((quote) => [`${quote.assetType}:${quote.code}`, quote]),
-        );
-        quotes.forEach((quote) => {
-          quoteMap.set(`${quote.assetType}:${quote.code}`, quote);
-        });
-        const quoteNameMap = new Map<string, AssetQuote>(
-          quotes.filter((quote) => quote.name.trim()).map((quote) => [`${quote.assetType}:${quote.code}`, quote]),
-        );
-        const assetHoldingsWithNames = workingSnapshot.assetHoldings.map((holding) => {
-          const quote = quoteNameMap.get(`${holding.assetType}:${holding.code}`);
-          const quoteName = quote?.name.trim();
-          if (!quoteName || holding.name === quoteName) {
-            return holding;
-          }
-          return {
-            ...holding,
-            name: quoteName,
-            updatedAt: quote.syncedAt || new Date().toISOString(),
-          };
-        });
-        const updatedQuoteCache = Array.from(quoteMap.values());
-        const benchmarkQuote = updatedQuoteCache.find((quote) => quote.assetType === 'index' && quote.code === '000001');
-        const nextPerformanceSnapshot = buildAssetPerformanceSnapshot(
-          convertAssetPositionsToCny(
-            buildAssetPositions(assetHoldingsWithNames, updatedQuoteCache),
-            getUsdCnyRate(updatedQuoteCache),
-          ),
-          benchmarkQuote,
-        );
-        const nextSnapshot = normalizeSnapshot({
-          ...workingSnapshot,
-          assetHoldings: assetHoldingsWithNames,
-          assetQuoteCache: updatedQuoteCache,
-          assetPerformanceHistory: mergeAssetPerformanceHistory(
-            workingSnapshot.assetPerformanceHistory,
-            nextPerformanceSnapshot,
-          ),
-        });
+        const weekEnd = getLastCompletedWeekEnd();
+        const needsWeeklyQuotes =
+          force || !isAssetQuoteCacheCurrent(workingSnapshot.assetHoldings, workingSnapshot.assetQuoteCache, weekEnd);
+
+        if (!needsWeeklyQuotes && !recurringResult.hasUpdates) {
+          return;
+        }
+
+        let nextSnapshot = workingSnapshot;
+        if (needsWeeklyQuotes) {
+          const quotes = runningInAndroid
+            ? await syncNativeWeeklyAssetQuotes(workingSnapshot.assetHoldings, workingSnapshot.appSettings.fundQuoteSource, weekEnd)
+            : await syncWebWeeklyAssetQuotes(workingSnapshot.assetHoldings, workingSnapshot.appSettings.fundQuoteSource, weekEnd);
+          const updatedQuoteCache = mergeWeeklyAssetQuotes(workingSnapshot.assetQuoteCache, quotes, weekEnd);
+          const quoteNameMap = new Map<string, AssetQuote>(
+            quotes.filter((quote) => quote.name.trim()).map((quote) => [`${quote.assetType}:${quote.code}`, quote]),
+          );
+          const assetHoldingsWithNames = workingSnapshot.assetHoldings.map((holding) => {
+            const quote = quoteNameMap.get(`${holding.assetType}:${holding.code}`);
+            const quoteName = quote?.name.trim();
+            if (!quoteName || holding.name === quoteName) {
+              return holding;
+            }
+            return {
+              ...holding,
+              name: quoteName,
+              updatedAt: quote.syncedAt || new Date().toISOString(),
+            };
+          });
+          const hasWeeklyHistory = workingSnapshot.assetPerformanceHistory.some(
+            (item) => item.date === weekEnd && item.period === 'week',
+          );
+          const nextPerformanceSnapshot = hasWeeklyHistory
+            ? null
+            : buildWeeklyPerformanceSnapshot(
+                convertAssetPositionsToCny(
+                  buildAssetPositions(assetHoldingsWithNames, updatedQuoteCache),
+                  getUsdCnyRate(updatedQuoteCache),
+                ),
+                updatedQuoteCache.find((quote) => quote.assetType === 'index' && quote.code === '000001'),
+                weekEnd,
+              );
+          nextSnapshot = normalizeSnapshot({
+            ...workingSnapshot,
+            assetHoldings: assetHoldingsWithNames,
+            assetQuoteCache: updatedQuoteCache,
+            assetPerformanceHistory: mergeAssetPerformanceHistory(
+              workingSnapshot.assetPerformanceHistory,
+              nextPerformanceSnapshot,
+            ),
+          });
+        }
 
         if (runningInAndroid) {
           applySnapshot(await saveNativeSnapshot(nextSnapshot));
@@ -1070,6 +1080,16 @@ const App: React.FC = () => {
       }
     },
     [applySnapshot, isSyncingAssets, processAssetRecurringPlans, runningInAndroid],
+  );
+
+  const handleFetchTradeQuote = useCallback(
+    async (holding: AssetHolding) => {
+      const quotes = runningInAndroid
+        ? await syncNativeAssetQuotes([holding], appSettings.fundQuoteSource)
+        : await syncWebAssetQuotes([holding], appSettings.fundQuoteSource);
+      return quotes.find((item) => item.assetType === holding.assetType && item.code === holding.code) ?? null;
+    },
+    [appSettings.fundQuoteSource, runningInAndroid],
   );
 
   const handleAddAssetHolding = async (data: Omit<AssetHolding, 'id' | 'createdAt' | 'updatedAt'>) => {
@@ -1222,14 +1242,14 @@ const App: React.FC = () => {
       const savedSnapshot = await saveNativeSnapshot(nextSnapshot);
       applySnapshot(savedSnapshot);
       if (fundQuoteSourceChanged) {
-        await syncAssetQuotesForSnapshot(savedSnapshot.assetHoldings, savedSnapshot);
+        await syncAssetQuotesForSnapshot(savedSnapshot.assetHoldings, savedSnapshot, true);
       }
       return;
     }
 
     applySnapshot(nextSnapshot);
     if (fundQuoteSourceChanged) {
-      await syncAssetQuotesForSnapshot(nextSnapshot.assetHoldings, nextSnapshot);
+      await syncAssetQuotesForSnapshot(nextSnapshot.assetHoldings, nextSnapshot, true);
     }
   };
 
@@ -1272,6 +1292,7 @@ const App: React.FC = () => {
             onSaveAssetRecurringPlan={handleSaveAssetRecurringPlan}
             onDeleteAssetRecurringPlan={handleDeleteAssetRecurringPlan}
             onSyncAssetQuotes={handleSyncAssetQuotes}
+            onFetchTradeQuote={handleFetchTradeQuote}
             onAnalyzeAssetScreenshot={handleAnalyzeAssetScreenshot}
           />
         );

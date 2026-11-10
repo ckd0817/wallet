@@ -67,6 +67,12 @@ interface WalletDataPlugin {
   upsertAssetRecurringPlan(options: { accountId?: string; assetRecurringPlan: AssetRecurringPlan }): Promise<WalletSnapshot>;
   deleteAssetRecurringPlan(options: { accountId?: string; id: string }): Promise<WalletSnapshot>;
   syncAssetQuotes(options: { accountId?: string; assetHoldings: AssetHolding[]; fundQuoteSource: FundQuoteSource }): Promise<{ quotes: AssetQuote[] }>;
+  syncWeeklyAssetQuotes(options: {
+    accountId?: string;
+    assetHoldings: AssetHolding[];
+    fundQuoteSource: FundQuoteSource;
+    weekEnd: string;
+  }): Promise<{ quotes: AssetQuote[] }>;
   testFundQuoteSource(options: { accountId?: string;
     source: FundQuoteSourceOption;
     code: string;
@@ -496,6 +502,20 @@ export const syncNativeAssetQuotes = async (assetHoldings: AssetHolding[], fundQ
   return normalizeAssetQuotes(result.quotes);
 };
 
+export const syncNativeWeeklyAssetQuotes = async (
+  assetHoldings: AssetHolding[],
+  fundQuoteSource: FundQuoteSource,
+  weekEnd: string,
+) => {
+  const result = await WalletData.syncWeeklyAssetQuotes({
+    accountId: getNativeAccountId(),
+    assetHoldings,
+    fundQuoteSource,
+    weekEnd,
+  });
+  return normalizeAssetQuotes(result.quotes);
+};
+
 export const testNativeFundQuoteSource = async (
   source: FundQuoteSourceOption,
   code: string,
@@ -551,6 +571,143 @@ export const syncWebAssetQuotes = async (
     }
     if (quote) {
       quotes.push(quote);
+    }
+  }
+
+  return normalizeAssetQuotes(quotes);
+};
+
+const shiftDateKey = (dateKey: string, days: number) => {
+  const date = new Date(`${dateKey}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().split('T')[0];
+};
+
+const pickWeeklyClose = (rows: { date: string; price: number }[], weekEnd: string, previousWeekEnd: string) => {
+  const valid = rows
+    .filter((row) => row.price > 0 && /^\d{4}-\d{2}-\d{2}$/.test(row.date) && row.date <= weekEnd)
+    .sort((left, right) => left.date.localeCompare(right.date));
+  const latest = valid.at(-1);
+  const previous = valid.filter((row) => row.date <= previousWeekEnd).at(-1);
+  if (!latest) {
+    return null;
+  }
+  return {
+    date: latest.date,
+    price: latest.price,
+    changePercent: previous ? ((latest.price - previous.price) / previous.price) * 100 : 0,
+  };
+};
+
+const fetchWebKline = async (symbol: string, startDate: string, weekEnd: string) => {
+  const response = await fetch(
+    `https://web.ifzq.gtimg.cn/appstock/app/fqkline/get?param=${encodeURIComponent(`${symbol},day,${startDate},${weekEnd},40,`)}`,
+  );
+  const payload = await response.json() as { data?: Record<string, { day?: string[][]; qt?: Record<string, string[]> }> };
+  return payload.data?.[symbol];
+};
+
+export const syncWebWeeklyAssetQuotes = async (
+  assetHoldings: AssetHolding[],
+  fundQuoteSource: FundQuoteSource = 'eastmoney',
+  weekEnd: string,
+) => {
+  const syncedAt = new Date().toISOString();
+  const startDate = shiftDateKey(weekEnd, -40);
+  const previousWeekEnd = shiftDateKey(weekEnd, -7);
+  const quotes: AssetQuote[] = [];
+  const klineTargets = [
+    ...assetHoldings
+      .filter((holding) => holding.assetType === 'stock')
+      .map((holding) => ({
+        holding,
+        symbol: holding.market === 'us' ? `us${holding.code}` : `${holding.market === 'sh' ? 'sh' : 'sz'}${holding.code}`,
+      })),
+    { holding: null, symbol: 'sh000001' },
+  ];
+
+  for (const { holding, symbol } of klineTargets) {
+    try {
+      let resolvedSymbol = symbol;
+      let item = await fetchWebKline(symbol, startDate, weekEnd);
+      if (!item?.day?.length && symbol.startsWith('us') && item?.qt?.[symbol]?.[2]) {
+        resolvedSymbol = `us${item.qt[symbol][2]}`;
+        item = await fetchWebKline(resolvedSymbol, startDate, weekEnd);
+      }
+      const close = pickWeeklyClose(
+        (item?.day ?? []).map((row) => ({ date: row[0], price: Number(row[2]) })),
+        weekEnd,
+        previousWeekEnd,
+      );
+      if (!close) {
+        continue;
+      }
+      quotes.push({
+        assetType: holding ? 'stock' : 'index',
+        code: holding ? holding.code : '000001',
+        name: item?.qt?.[resolvedSymbol]?.[1] ?? holding?.name ?? '',
+        price: close.price,
+        changePercent: close.changePercent,
+        quoteTime: close.date,
+        source: holding ? `tencent-${holding.market}` : 'tencent-index-sh',
+        syncedAt,
+        currency: holding ? getAssetCurrency(holding) : 'CNY',
+        periodEnd: weekEnd,
+      });
+    } catch (error) {
+      console.error('Failed to fetch weekly quote', symbol, error);
+    }
+  }
+
+  for (const holding of assetHoldings.filter((item) => item.assetType === 'fund')) {
+    try {
+      let rows: { date: string; price: number }[];
+      if (fundQuoteSource === 'sina') {
+        const response = await fetch(
+          `https://stock.finance.sina.com.cn/fundInfo/api/openapi.php/CaihuiFundInfoService.getNav?symbol=${holding.code}&datefrom=${startDate}&dateto=${weekEnd}&page=1&num=40`,
+        );
+        const payload = await response.json() as { result?: { data?: { data?: { fbrq?: string; jjjz?: string }[] } } };
+        rows = (payload.result?.data?.data ?? []).map((row) => ({ date: (row.fbrq ?? '').split(' ')[0], price: Number(row.jjjz) }));
+      } else {
+        const response = await fetch(
+          `https://api.fund.eastmoney.com/f10/lsjz?fundCode=${holding.code}&pageIndex=1&pageSize=40&startDate=${startDate}&endDate=${weekEnd}`,
+        );
+        const payload = await response.json() as { Data?: { LSJZList?: { FSRQ?: string; DWJZ?: string }[] } };
+        rows = (payload.Data?.LSJZList ?? []).map((row) => ({ date: row.FSRQ ?? '', price: Number(row.DWJZ) }));
+      }
+      const close = pickWeeklyClose(rows, weekEnd, previousWeekEnd);
+      if (!close) {
+        continue;
+      }
+      quotes.push({
+        assetType: 'fund',
+        code: holding.code,
+        name: holding.name,
+        price: close.price,
+        changePercent: close.changePercent,
+        quoteTime: close.date,
+        source: fundQuoteSource === 'sina' ? 'sina-fund' : 'eastmoney-f10',
+        syncedAt,
+        currency: 'CNY',
+        priceSource: 'confirmed',
+        confirmedPrice: close.price,
+        confirmedDate: close.date,
+        periodEnd: weekEnd,
+      });
+    } catch (error) {
+      console.error('Failed to fetch weekly fund quote', holding.code, error);
+    }
+  }
+
+  if (assetHoldings.some((holding) => getAssetCurrency(holding) === 'USD')) {
+    try {
+      const response = await fetch(`https://api.frankfurter.dev/v2/rate/USD/CNY?date=${weekEnd}`);
+      const quote = parseUsdCnyRateResponse(await response.text(), syncedAt);
+      if (quote) {
+        quotes.push({ ...quote, source: 'frankfurter', periodEnd: weekEnd });
+      }
+    } catch (error) {
+      console.error('Failed to fetch weekly exchange rate', error);
     }
   }
 

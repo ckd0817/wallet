@@ -29,7 +29,7 @@ import {
 } from '../types';
 import {
   buildAssetHoldingDistribution,
-  buildAssetPerformanceSnapshot,
+  aggregateWeeklyPerformanceHistory,
   buildAssetPositions,
   buildAssetSummary,
   convertAssetPositionsToCny,
@@ -40,7 +40,7 @@ import {
   getAssetDisplayName,
   getUsdCnyRate,
   isDelayedSettlementFund,
-  mergeAssetPerformanceHistory,
+  getLastCompletedWeekEnd,
   mergeAssetHoldingDistribution,
   normalizeAssetCode,
   normalizeAssetImportCandidate,
@@ -66,6 +66,7 @@ interface AnalysisProps {
   onSaveAssetRecurringPlan: (plan: Omit<AssetRecurringPlan, 'id' | 'createdAt' | 'updatedAt'>, existingId?: string) => Promise<void> | void;
   onDeleteAssetRecurringPlan: (id: string) => Promise<void> | void;
   onSyncAssetQuotes: () => Promise<void> | void;
+  onFetchTradeQuote: (holding: AssetHolding) => Promise<AssetQuote | null>;
   onAnalyzeAssetScreenshot: (imageBase64: string) => Promise<AssetImportCandidate[]>;
 }
 
@@ -123,6 +124,7 @@ const Analysis: React.FC<AnalysisProps> = ({
   onSaveAssetRecurringPlan,
   onDeleteAssetRecurringPlan,
   onSyncAssetQuotes,
+  onFetchTradeQuote,
   onAnalyzeAssetScreenshot,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -157,8 +159,6 @@ const Analysis: React.FC<AnalysisProps> = ({
     [summary.totalMarketValue, transactions, expenseAverageMonths],
   );
   const hasUsdPositions = positions.some((position) => getAssetCurrency(position.holding) === 'USD');
-  const dailyBaseValue = summary.totalMarketValue - summary.dailyChangeAmount;
-  const dailyChangeRate = dailyBaseValue > 0 ? summary.dailyChangeAmount / dailyBaseValue * 100 : 0;
   const positionConversionRate = (holding: AssetHolding) => getAssetCurrency(holding) === 'USD' ? usdCnyRate : 1;
   const formatPositionMoney = (amount: number, holding: AssetHolding) => {
     const rate = positionConversionRate(holding);
@@ -168,17 +168,12 @@ const Analysis: React.FC<AnalysisProps> = ({
     const rate = positionConversionRate(holding);
     return rate > 0 ? `${formatSignedAssetMoney(amount * rate, 'CNY')} / ${profitRate.toFixed(1)}%` : '汇率暂不可用';
   };
+  const lastWeekEnd = getLastCompletedWeekEnd();
   const displayPerformanceHistory = useMemo(
-    () =>
-      mergeAssetPerformanceHistory(
-        assetPerformanceHistory,
-        buildAssetPerformanceSnapshot(
-          cnyPositions,
-          assetQuoteCache.find((quote) => quote.assetType === 'index' && quote.code === '000001'),
-        ),
-      ),
-    [assetPerformanceHistory, assetQuoteCache, cnyPositions],
+    () => aggregateWeeklyPerformanceHistory(assetPerformanceHistory, lastWeekEnd),
+    [assetPerformanceHistory, lastWeekEnd],
   );
+  const lastWeekPerformance = displayPerformanceHistory.find((item) => item.date === lastWeekEnd);
   const distribution = useMemo(() => buildAssetHoldingDistribution(cnyPositions), [cnyPositions]);
   const editingHolding = useMemo(
     () => assetHoldings.find((holding) => holding.id === editingId) ?? null,
@@ -335,8 +330,16 @@ const Analysis: React.FC<AnalysisProps> = ({
     if (editingHolding && operationValue.trim()) {
       const value = Number(operationValue);
       if (!Number.isFinite(value) || value <= 0) { alert(operationUnit === 'shares' ? '请输入份额' : '请输入金额'); return; }
-      const quote = positions.find(position => position.holding.id === editingId)?.quote;
-      const delayed = isDelayedSettlementFund({ ...editingHolding, name: quote?.name || editingHolding.name });
+      const cachedQuote = positions.find(position => position.holding.id === editingId)?.quote;
+      const delayed = isDelayedSettlementFund({ ...editingHolding, name: cachedQuote?.name || editingHolding.name });
+      let quote = cachedQuote;
+      if (!delayed) {
+        savingRef.current = true;
+        setIsSaving(true);
+        try { quote = (await onFetchTradeQuote(editingHolding)) ?? undefined; }
+        catch { quote = undefined; }
+        finally { savingRef.current = false; setIsSaving(false); }
+      }
       const price = quote?.price ?? 0;
       const amount = operationUnit === 'shares' ? (delayed ? 0 : value * price) : value;
       if (operationType === 'sell' && operationUnit === 'shares' && value > payload.shares) {
@@ -439,10 +442,10 @@ const Analysis: React.FC<AnalysisProps> = ({
           subValue={`${summary.totalProfitRate.toFixed(1)}%`}
         />
         <SummaryCard
-          label="今日涨跌"
-          value={formatSignedAssetMoney(summary.dailyChangeAmount, 'CNY')}
-          tone={summary.dailyChangeAmount >= 0 ? 'positive' : 'negative'}
-          subValue={formatSignedPercent(dailyChangeRate)}
+          label="上周收益"
+          value={lastWeekPerformance ? formatSignedAssetMoney(lastWeekPerformance.dailyProfit, 'CNY') : '暂无'}
+          tone={(lastWeekPerformance?.dailyProfit ?? 0) >= 0 ? 'positive' : 'negative'}
+          subValue={lastWeekPerformance ? formatSignedPercent(lastWeekPerformance.dailyProfitRate) : undefined}
         />
         <SummaryCard
           label="不用上班天数"
@@ -561,9 +564,9 @@ const Analysis: React.FC<AnalysisProps> = ({
                 <Meta label="份额" value={position.holding.shares.toFixed(2)} />
                 <Meta label="总成本" value={formatPositionMoney(position.holding.costAmount, position.holding)} />
                 <Meta
-                  label="涨跌幅"
-                  value={position.quote ? `${position.quote.changePercent >= 0 ? '+' : ''}${position.quote.changePercent.toFixed(2)}%` : '暂无'}
-                  tone={position.quote && position.quote.changePercent < 0 ? 'negative' : 'positive'}
+                  label="收益率"
+                  value={position.quote ? formatSignedPercent(position.profitRate) : '暂无'}
+                  tone={position.profit < 0 ? 'negative' : 'positive'}
                 />
               </div>
               {position.quote?.error && <p className="text-xs text-danger mt-3">{position.quote.error}</p>}
@@ -1141,8 +1144,8 @@ const RecurringSummaryCard = ({ label, value }: { label: string; value: string }
   </div>
 );
 
-type AssetTrendRange = 'week' | 'month' | 'year' | 'all';
-type AssetCalendarMode = 'day' | 'month' | 'year';
+type AssetTrendRange = 'month' | 'year' | 'all';
+type AssetCalendarMode = 'month' | 'year';
 
 const ProfitAnalytics = ({
   history,
@@ -1155,8 +1158,8 @@ const ProfitAnalytics = ({
   usdDistribution: ReturnType<typeof buildAssetHoldingDistribution>;
   showCnyHistory: boolean;
 }) => {
-  const [trendRange, setTrendRange] = useState<AssetTrendRange>('week');
-  const [calendarMode, setCalendarMode] = useState<AssetCalendarMode>('day');
+  const [trendRange, setTrendRange] = useState<AssetTrendRange>('month');
+  const [calendarMode, setCalendarMode] = useState<AssetCalendarMode>('month');
   const latest = history.at(-1);
   const cumulativeTrendHistory = useMemo(() => buildCumulativeTrendHistory(history), [history]);
   const filteredHistory = useMemo(() => filterPerformanceHistory(history, trendRange), [history, trendRange]);
@@ -1168,11 +1171,11 @@ const ProfitAnalytics = ({
     ...item,
     label: `${Number(item.date.slice(5, 7))}/${Number(item.date.slice(8, 10))}`,
   }));
-  const calendarMonth = latest?.date.slice(0, 7) ?? new Date().toISOString().slice(0, 7);
-  const calendarDays = buildCalendarDays(calendarMonth, history);
-  const calendarMonths = buildCalendarMonths(calendarMonth.slice(0, 4), history);
+  const calendarYear = latest?.date.slice(0, 4) ?? String(new Date().getFullYear());
+  const calendarMonths = buildCalendarMonths(calendarYear, history);
   const calendarYears = buildCalendarYears(history);
-  const monthProfit = calendarDays.reduce((sum, item) => sum + (item.snapshot?.dailyProfit ?? 0), 0);
+  const calendarProfit = (calendarMode === 'month' ? calendarMonths : calendarYears)
+    .reduce((sum, item) => sum + (item.value ?? 0), 0);
   const rangeProfit = filteredHistory.reduce((sum, item) => sum + item.dailyProfit, 0);
   const latestTrend = filteredTrendHistory.at(-1);
   const cumulativeProfitRate = latestTrend?.cumulativeProfitRate ?? 0;
@@ -1193,12 +1196,10 @@ const ProfitAnalytics = ({
               </div>
             )}
           </div>
-          <span className="text-xs text-secondary">{latest?.date ?? '暂无'}</span>
         </div>
         <SegmentedControl
           value={trendRange}
           options={[
-            { value: 'week', label: '本周' },
             { value: 'month', label: '本月' },
             { value: 'year', label: '今年' },
             { value: 'all', label: '全部' },
@@ -1253,33 +1254,18 @@ const ProfitAnalytics = ({
         <div className="flex items-start justify-between gap-3 mb-4">
           <div>
             <h3 className="text-base font-semibold text-primary">{usdDistribution.length > 0 ? '人民币盈亏日历' : '盈亏日历'}</h3>
-            <p className={`text-sm mt-1 ${profitTone(monthProfit)}`}>{formatSignedCurrency(monthProfit)}</p>
+            <p className={`text-sm mt-1 ${profitTone(calendarProfit)}`}>{formatSignedCurrency(calendarProfit)}</p>
           </div>
-          <span className="text-xs text-secondary">{calendarMonth.replace('-', '年')}月</span>
+          {calendarMode === 'month' && <span className="text-xs text-secondary">{calendarYear}年</span>}
         </div>
         <SegmentedControl
           value={calendarMode}
           options={[
-            { value: 'day', label: '日' },
             { value: 'month', label: '月' },
             { value: 'year', label: '年' },
           ]}
           onChange={(value) => setCalendarMode(value as AssetCalendarMode)}
         />
-        {calendarMode === 'day' && (
-          <>
-            <div className="grid grid-cols-7 gap-1 text-center text-[11px] text-zinc-400 mb-2">
-              {['日', '一', '二', '三', '四', '五', '六'].map((item) => (
-                <span key={item}>{item}</span>
-              ))}
-            </div>
-            <div className="grid grid-cols-7 gap-1">
-              {calendarDays.map((item, index) => (
-                <ProfitCell key={`${item.date || 'empty'}-${index}`} label={item.date ? String(Number(item.date.slice(8, 10))) : ''} value={item.snapshot?.dailyProfit} square />
-              ))}
-            </div>
-          </>
-        )}
         {calendarMode === 'month' && (
           <div className="grid grid-cols-3 gap-2">
             {calendarMonths.map((item) => (
@@ -1483,25 +1469,6 @@ const formatCompactSigned = (value: number) => {
   return `${prefix}${amount.toFixed(0)}`;
 };
 
-const buildCalendarDays = (month: string, history: AssetPerformanceSnapshot[]) => {
-  const [year, monthIndex] = month.split('-').map(Number);
-  const firstDay = new Date(year, monthIndex - 1, 1);
-  const daysInMonth = new Date(year, monthIndex, 0).getDate();
-  const snapshotMap = new Map(history.map((item) => [item.date, item]));
-  const days: { date: string; snapshot?: AssetPerformanceSnapshot }[] = [];
-
-  for (let index = 0; index < firstDay.getDay(); index++) {
-    days.push({ date: '' });
-  }
-
-  for (let day = 1; day <= daysInMonth; day++) {
-    const date = `${year}-${String(monthIndex).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-    days.push({ date, snapshot: snapshotMap.get(date) });
-  }
-
-  return days;
-};
-
 type CumulativeAssetTrend = AssetPerformanceSnapshot & {
   cumulativeProfitRate: number;
   cumulativeBenchmarkChangePercent: number;
@@ -1533,10 +1500,7 @@ const filterPerformanceHistory = <T extends AssetPerformanceSnapshot>(history: T
   const latestDate = parseDateKey(history.at(-1)?.date ?? new Date().toISOString().split('T')[0]);
   const start = new Date(latestDate);
 
-  if (range === 'week') {
-    const day = latestDate.getDay() || 7;
-    start.setDate(latestDate.getDate() - day + 1);
-  } else if (range === 'month') {
+  if (range === 'month') {
     start.setDate(1);
   } else {
     start.setMonth(0, 1);
