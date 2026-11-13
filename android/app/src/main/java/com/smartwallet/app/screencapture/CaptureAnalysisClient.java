@@ -1,6 +1,7 @@
 package com.smartwallet.app.screencapture;
 
 import android.util.Base64;
+import com.smartwallet.app.assets.AssetScreenshotAnalysisClient;
 import java.io.BufferedReader;
 import java.io.InputStream;
 import java.io.InputStreamReader;
@@ -40,22 +41,17 @@ public class CaptureAnalysisClient {
     private static final String CONNECTIVITY_TEST_USER_PROMPT =
         "这是一条模型连通性测试请求。请直接回复“连接成功”，或任意一句简短的确认文本。";
 
-    public CaptureAnalysisOutcome analyze(byte[] pngBytes, JSONObject llmConfig, JSONArray categories) {
+    /**
+     * 一次识别同时完成记账/持仓分类与字段提取。配置缺失返回 config 失败。
+     */
+    public CombinedCaptureResult analyzeCombined(byte[] pngBytes, JSONObject llmConfig, JSONArray categories) {
         if (
             llmConfig == null ||
             llmConfig.optString("apiKey", "").trim().isEmpty() ||
             llmConfig.optString("baseUrl", "").trim().isEmpty() ||
             llmConfig.optString("modelName", "").trim().isEmpty()
         ) {
-            return new CaptureAnalysisOutcome(
-                CaptureAnalysisResult.unsupported("未配置支持图片输入的截图模型"),
-                0,
-                "",
-                "",
-                null,
-                "config",
-                "未配置支持图片输入的截图模型"
-            );
+            return CombinedCaptureResult.failure("config", "未配置支持图片输入的截图模型", 0, "");
         }
 
         HttpURLConnection connection = null;
@@ -76,14 +72,14 @@ public class CaptureAnalysisClient {
             body.put(
                 "messages",
                 new JSONArray()
-                    .put(new JSONObject().put("role", "system").put("content", "你是截图自动记账助手。只返回原始 JSON，不要输出 Markdown、解释或额外文本。"))
+                    .put(new JSONObject().put("role", "system").put("content", "你是截图自动处理助手。先判断截图是记账还是持仓，再按要求返回原始 JSON，不要输出 Markdown、解释或额外文本。"))
                     .put(
                         new JSONObject()
                             .put("role", "user")
                             .put(
                                 "content",
                                 new JSONArray()
-                                    .put(new JSONObject().put("type", "text").put("text", buildPrompt(categories, llmConfig)))
+                                    .put(new JSONObject().put("type", "text").put("text", buildCombinedPrompt(categories, llmConfig)))
                                     .put(
                                         new JSONObject()
                                             .put("type", "image_url")
@@ -103,60 +99,110 @@ public class CaptureAnalysisClient {
             );
 
             if (httpStatus < 200 || httpStatus >= 300) {
-                return new CaptureAnalysisOutcome(
-                    CaptureAnalysisResult.unsupported("截图模型请求失败"),
-                    httpStatus,
-                    responseBody,
-                    "",
-                    null,
-                    "http",
-                    "截图模型请求失败"
-                );
+                return CombinedCaptureResult.failure("http", "截图模型请求失败", httpStatus, responseBody);
             }
 
-            CaptureAnalysisOutcome outcome = CaptureAnalysisParser.parseChatResponse(responseBody)
-                .withHttpStatus(httpStatus)
-                .withResponseBodyRaw(responseBody);
-
-            if (!outcome.isSupported()) {
-                return outcome;
-            }
-
-            String resolvedCategoryId = resolveCategoryId(
-                outcome.getResult().getCategoryId(),
-                outcome.getResult().getTransactionType(),
-                categories
-            );
-            if (resolvedCategoryId.isEmpty()) {
-                return new CaptureAnalysisOutcome(
-                    CaptureAnalysisResult.unsupported("分类无法映射到当前账本"),
-                    outcome.getHttpStatus(),
-                    outcome.getResponseBodyRaw(),
-                    outcome.getAssistantReplyRaw(),
-                    outcome.getAssistantReplyParsed(),
-                    "validation",
-                    "分类无法映射到当前账本"
-                );
-            }
-
-            return outcome.withResolvedCategory(resolvedCategoryId);
+            String assistantReply = CaptureAnalysisParser.extractAssistantReply(responseBody);
+            JSONObject content = parseContentJson(assistantReply);
+            String kind = content == null ? "" : content.optString("kind", "").trim().toLowerCase(Locale.ROOT);
+            return CombinedCaptureResult.success(kind, httpStatus, responseBody, assistantReply, content);
         } catch (Exception exception) {
             String failureReason = exception.getMessage() == null || exception.getMessage().trim().isEmpty()
                 ? "截图分析失败"
                 : "截图分析失败: " + exception.getMessage().trim();
-            return new CaptureAnalysisOutcome(
-                CaptureAnalysisResult.unsupported(failureReason),
-                0,
-                "",
-                "",
-                null,
-                "network",
-                failureReason
-            );
+            return CombinedCaptureResult.failure("network", failureReason, 0, "");
         } finally {
             if (connection != null) {
                 connection.disconnect();
             }
+        }
+    }
+
+    /**
+     * 将已收到的记账响应解析为交易结果并映射分类，不再发起网络请求。
+     */
+    public CaptureAnalysisOutcome resolveBookkeepingOutcome(String responseBody, int httpStatus, JSONArray categories) {
+        CaptureAnalysisOutcome outcome = CaptureAnalysisParser.parseChatResponse(responseBody)
+            .withHttpStatus(httpStatus)
+            .withResponseBodyRaw(responseBody);
+
+        if (!outcome.isSupported()) {
+            return outcome;
+        }
+
+        String resolvedCategoryId = resolveCategoryId(
+            outcome.getResult().getCategoryId(),
+            outcome.getResult().getTransactionType(),
+            categories
+        );
+        if (resolvedCategoryId.isEmpty()) {
+            return new CaptureAnalysisOutcome(
+                CaptureAnalysisResult.unsupported("分类无法映射到当前账本"),
+                outcome.getHttpStatus(),
+                outcome.getResponseBodyRaw(),
+                outcome.getAssistantReplyRaw(),
+                outcome.getAssistantReplyParsed(),
+                "validation",
+                "分类无法映射到当前账本"
+            );
+        }
+
+        return outcome.withResolvedCategory(resolvedCategoryId);
+    }
+
+    private JSONObject parseContentJson(String assistantReply) {
+        String cleaned = assistantReply == null ? "" : assistantReply.replaceAll("```json\\s*|```", "").trim();
+        if (cleaned.isEmpty()) {
+            return null;
+        }
+        try {
+            return new JSONObject(cleaned);
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    /** 单次识别返回的原始结果：分类结果 + 原始响应供下游按 kind 解析。 */
+    public static final class CombinedCaptureResult {
+        public final boolean requestOk;
+        public final String failureStage;
+        public final String failureReason;
+        public final int httpStatus;
+        public final String responseBody;
+        public final String assistantReply;
+        public final JSONObject content;
+        public final String kind;
+
+        private CombinedCaptureResult(
+            boolean requestOk,
+            String failureStage,
+            String failureReason,
+            int httpStatus,
+            String responseBody,
+            String assistantReply,
+            JSONObject content,
+            String kind
+        ) {
+            this.requestOk = requestOk;
+            this.failureStage = failureStage == null ? "" : failureStage;
+            this.failureReason = failureReason == null ? "" : failureReason;
+            this.httpStatus = httpStatus;
+            this.responseBody = responseBody == null ? "" : responseBody;
+            this.assistantReply = assistantReply == null ? "" : assistantReply;
+            this.content = content;
+            this.kind = kind == null ? "" : kind;
+        }
+
+        static CombinedCaptureResult success(String kind, int httpStatus, String responseBody, String assistantReply, JSONObject content) {
+            return new CombinedCaptureResult(true, "", "", httpStatus, responseBody, assistantReply, content, kind);
+        }
+
+        static CombinedCaptureResult failure(String failureStage, String failureReason, int httpStatus, String responseBody) {
+            return new CombinedCaptureResult(false, failureStage, failureReason, httpStatus, responseBody, "", null, "");
+        }
+
+        public boolean isAsset() {
+            return "asset".equals(kind);
         }
     }
 
@@ -263,6 +309,16 @@ public class CaptureAnalysisClient {
             return normalized;
         }
         return normalized + "/chat/completions";
+    }
+
+    private String buildCombinedPrompt(JSONArray categories, JSONObject llmConfig) {
+        String bookkeepingPrompt = buildPrompt(categories, llmConfig);
+        return "先判断这张截图是支付/收款/订单类记账截图，还是股票/基金持仓截图。\n" +
+            "记账类截图返回 {\"kind\":\"bookkeeping\",...记账字段}；持仓类截图返回 {\"kind\":\"asset\",...持仓字段}。\n" +
+            "无法确定时默认按记账处理，kind 写 bookkeeping。\n\n" +
+            "【kind=bookkeeping 时】\n" + bookkeepingPrompt + "\n\n" +
+            "【kind=asset 时】\n" + AssetScreenshotAnalysisClient.PROMPT + "\n\n" +
+            "最终只返回一个 JSON 对象，必须包含 kind 字段，且只包含对应类型的字段，不要输出 Markdown、解释或额外文本。";
     }
 
     private String buildPrompt(JSONArray categories, JSONObject llmConfig) {

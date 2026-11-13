@@ -1,7 +1,6 @@
 package com.smartwallet.app.screencapture;
 
 import android.content.Context;
-import android.util.Base64;
 import android.util.Log;
 import com.smartwallet.app.ScreenCaptureBookkeepingPlugin;
 import com.smartwallet.app.assets.AssetScreenshotAnalysisClient;
@@ -25,7 +24,6 @@ public final class CaptureProcessingEngine {
 
     private final Context appContext;
     private final CaptureAnalysisClient analysisClient = new CaptureAnalysisClient();
-    private final CaptureKindClassifier kindClassifier = new CaptureKindClassifier();
     private final AssetScreenshotAnalysisClient assetAnalysisClient = new AssetScreenshotAnalysisClient();
     private final CaptureImageStore captureImageStore;
     private final CaptureLogFactory captureLogFactory = new CaptureLogFactory();
@@ -75,13 +73,24 @@ public final class CaptureProcessingEngine {
             emitStatus();
             NotificationHelper.showCaptureProcessing(appContext);
 
-            String kind = kindClassifier.classify(pngBytes, repository().getLlmConfig());
-            if (CaptureKindClassifier.KIND_ASSET.equals(kind)) {
-                processAssetCapture(pngBytes, captureLog);
+            CaptureAnalysisClient.CombinedCaptureResult combined =
+                analysisClient.analyzeCombined(pngBytes, repository().getLlmConfig(), repository().getCategories());
+            if (!combined.requestOk) {
+                repository().upsertCaptureLog(buildAssetFailureLog(captureLog, combined));
+                updateError(combined.failureReason.isEmpty() ? "截图分析失败" : combined.failureReason);
                 return null;
             }
 
-            CaptureAnalysisOutcome outcome = analysisClient.analyze(pngBytes, repository().getLlmConfig(), repository().getCategories());
+            if (combined.isAsset()) {
+                processAssetCapture(combined, captureLog);
+                return null;
+            }
+
+            CaptureAnalysisOutcome outcome = analysisClient.resolveBookkeepingOutcome(
+                combined.responseBody,
+                combined.httpStatus,
+                repository().getCategories()
+            );
             if (!outcome.isSupported()) {
                 repository().upsertCaptureLog(captureLogFactory.createCompletedLog(captureLog, outcome, null));
                 updateError(outcome.getFailureReason().isEmpty() ? "截图分析失败" : outcome.getFailureReason());
@@ -111,22 +120,20 @@ public final class CaptureProcessingEngine {
         }
     }
 
-    private void processAssetCapture(byte[] pngBytes, JSONObject captureLog) {
-        String imageBase64 = Base64.encodeToString(pngBytes, Base64.NO_WRAP);
-        JSONObject analysis = assetAnalysisClient.analyze(imageBase64, repository().getLlmConfig());
-        boolean ok = analysis.optBoolean("ok", false);
-        if (!ok) {
-            String message = analysis.optString("message", "").trim();
-            String reason = message.isEmpty() ? "未识别到持仓" : message;
-            repository().upsertCaptureLog(buildAssetFailureLog(captureLog, analysis, reason));
-            updateError(reason);
+    private void processAssetCapture(CaptureAnalysisClient.CombinedCaptureResult combined, JSONObject captureLog) {
+        org.json.JSONArray holdings = combined.content == null
+            ? new org.json.JSONArray()
+            : assetAnalysisClient.normalizeHoldings(combined.content.optJSONArray("holdings"));
+        if (holdings.length() == 0) {
+            repository().upsertCaptureLog(buildAssetFailureLog(captureLog, combined, "未识别到持仓"));
+            updateError("未识别到持仓");
             return;
         }
 
-        AssetScreenshotApplier.Result result = new AssetScreenshotApplier(repository()).apply(analysis.optJSONArray("holdings"));
+        AssetScreenshotApplier.Result result = new AssetScreenshotApplier(repository()).apply(holdings);
         String summary = result.summary == null ? "" : result.summary;
         if (result.appliedCount == 0) {
-            repository().upsertCaptureLog(buildAssetSuccessLog(captureLog, analysis, "持仓无变化"));
+            repository().upsertCaptureLog(buildAssetSuccessLog(captureLog, combined, "持仓无变化"));
             repository().saveAutoBookkeepingSettings(statusUpdate("", System.currentTimeMillis()));
             if (repository().isActive()) {
                 NotificationHelper.showAssetResult(appContext, "持仓无变化");
@@ -135,7 +142,7 @@ public final class CaptureProcessingEngine {
             return;
         }
 
-        repository().upsertCaptureLog(buildAssetSuccessLog(captureLog, analysis, summary));
+        repository().upsertCaptureLog(buildAssetSuccessLog(captureLog, combined, summary));
         repository().saveAutoBookkeepingSettings(statusUpdate("", System.currentTimeMillis()));
         if (repository().isActive()) {
             NotificationHelper.showAssetResult(appContext, summary);
@@ -145,25 +152,29 @@ public final class CaptureProcessingEngine {
         }
     }
 
-    private JSONObject buildAssetSuccessLog(JSONObject pendingLog, JSONObject analysis, String summary) {
+    private JSONObject buildAssetSuccessLog(JSONObject pendingLog, CaptureAnalysisClient.CombinedCaptureResult combined, String summary) {
         JSONObject log = cloneLog(pendingLog);
         safePut(log, "status", "success");
         safePut(log, "failureStage", "");
         safePut(log, "failureReason", "");
         safePut(log, "summary", summary);
-        safePut(log, "assistantReplyRaw", analysis.optString("assistantReplyRaw", ""));
-        safePut(log, "responseBodyRaw", analysis.optString("responseBodyRaw", ""));
+        safePut(log, "assistantReplyRaw", combined.assistantReply);
+        safePut(log, "responseBodyRaw", combined.responseBody);
         return log;
     }
 
-    private JSONObject buildAssetFailureLog(JSONObject pendingLog, JSONObject analysis, String reason) {
+    private JSONObject buildAssetFailureLog(JSONObject pendingLog, CaptureAnalysisClient.CombinedCaptureResult combined) {
+        return buildAssetFailureLog(pendingLog, combined, combined.failureReason);
+    }
+
+    private JSONObject buildAssetFailureLog(JSONObject pendingLog, CaptureAnalysisClient.CombinedCaptureResult combined, String reason) {
         JSONObject log = cloneLog(pendingLog);
         safePut(log, "status", "failed");
-        safePut(log, "failureStage", analysis.optString("failureStage", "validation"));
+        safePut(log, "failureStage", combined.failureStage.isEmpty() ? "validation" : combined.failureStage);
         safePut(log, "failureReason", reason);
         safePut(log, "summary", reason);
-        safePut(log, "assistantReplyRaw", analysis.optString("assistantReplyRaw", ""));
-        safePut(log, "responseBodyRaw", analysis.optString("responseBodyRaw", ""));
+        safePut(log, "assistantReplyRaw", combined.assistantReply);
+        safePut(log, "responseBodyRaw", combined.responseBody);
         return log;
     }
 

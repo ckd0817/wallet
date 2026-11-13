@@ -14,7 +14,7 @@ import org.json.JSONObject;
 
 public class AssetScreenshotAnalysisClient {
 
-    private static final String PROMPT =
+    public static final String PROMPT =
         "你正在分析一张股票或基金持仓截图。\n" +
         "识别 A 股、美股、场内 ETF 和场外公募基金。\n" +
         "请提取每个持仓的代码、名称、类型、份额、总成本、单位成本、市值、持仓收益和收益率。\n" +
