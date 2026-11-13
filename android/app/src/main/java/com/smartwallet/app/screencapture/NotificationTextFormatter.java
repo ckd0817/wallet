@@ -23,6 +23,18 @@ final class NotificationTextFormatter {
         return "识别失败";
     }
 
+    static String buildAssetResultTitle() {
+        return "持仓已更新";
+    }
+
+    static String buildAssetResultText(String summary) {
+        if (summary == null) {
+            return "持仓已更新";
+        }
+        String trimmed = summary.trim();
+        return trimmed.isEmpty() ? "持仓已更新" : trimmed;
+    }
+
     static String buildCaptureResultLine(JSONObject transaction) {
         String merchantLabel = transaction.optString("merchantName", "").trim();
         if (merchantLabel.isEmpty()) {

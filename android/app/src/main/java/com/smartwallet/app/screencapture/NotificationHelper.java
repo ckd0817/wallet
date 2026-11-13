@@ -209,6 +209,37 @@ public final class NotificationHelper {
         NotificationManagerCompat.from(context).notify((int) (System.currentTimeMillis() % Integer.MAX_VALUE), notification);
     }
 
+    public static void showAssetResult(Context context, String summary) {
+        cancelCaptureProcessing(context);
+        if (!isNotificationPermissionGranted(context)) {
+            return;
+        }
+        String resultText = NotificationTextFormatter.buildAssetResultText(summary);
+        String title = NotificationTextFormatter.buildAssetResultTitle();
+
+        PendingIntent openIntent = PendingIntent.getActivity(
+            context,
+            "asset_capture".hashCode(),
+            buildAssetDeepLinkIntent(context),
+            pendingIntentFlags()
+        );
+
+        Notification notification = new NotificationCompat.Builder(context, ALERT_CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_menu_save)
+            .setContentTitle(title)
+            .setContentText(resultText)
+            .setStyle(new NotificationCompat.BigTextStyle().bigText(resultText))
+            .setAutoCancel(true)
+            .setContentIntent(openIntent)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setCategory(NotificationCompat.CATEGORY_STATUS)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setPublicVersion(buildPublicAlertNotification(context, title, resultText))
+            .build();
+
+        NotificationManagerCompat.from(context).notify((int) (System.currentTimeMillis() % Integer.MAX_VALUE), notification);
+    }
+
     public static void showCaptureFailure(Context context, String message) {
         cancelCaptureProcessing(context);
         if (!isNotificationPermissionGranted(context)) {
@@ -257,6 +288,13 @@ public final class NotificationHelper {
 
     private static Intent buildDeepLinkIntent(Context context, String transactionId) {
         Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse("smartwallet://transaction/" + Uri.encode(transactionId) + "/edit"));
+        intent.setClass(context, MainActivity.class);
+        intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_NEW_TASK);
+        return intent;
+    }
+
+    private static Intent buildAssetDeepLinkIntent(Context context) {
+        Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse("smartwallet://assets"));
         intent.setClass(context, MainActivity.class);
         intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP | Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_NEW_TASK);
         return intent;

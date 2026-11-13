@@ -1,8 +1,11 @@
 package com.smartwallet.app.screencapture;
 
 import android.content.Context;
+import android.util.Base64;
 import android.util.Log;
 import com.smartwallet.app.ScreenCaptureBookkeepingPlugin;
+import com.smartwallet.app.assets.AssetScreenshotAnalysisClient;
+import com.smartwallet.app.assets.AssetScreenshotApplier;
 import com.smartwallet.app.data.WalletRepository;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
@@ -22,6 +25,8 @@ public final class CaptureProcessingEngine {
 
     private final Context appContext;
     private final CaptureAnalysisClient analysisClient = new CaptureAnalysisClient();
+    private final CaptureKindClassifier kindClassifier = new CaptureKindClassifier();
+    private final AssetScreenshotAnalysisClient assetAnalysisClient = new AssetScreenshotAnalysisClient();
     private final CaptureImageStore captureImageStore;
     private final CaptureLogFactory captureLogFactory = new CaptureLogFactory();
     private final SimpleDateFormat dateFormatter = new SimpleDateFormat("yyyy-MM-dd", Locale.US);
@@ -70,6 +75,12 @@ public final class CaptureProcessingEngine {
             emitStatus();
             NotificationHelper.showCaptureProcessing(appContext);
 
+            String kind = kindClassifier.classify(pngBytes, repository().getLlmConfig());
+            if (CaptureKindClassifier.KIND_ASSET.equals(kind)) {
+                processAssetCapture(pngBytes, captureLog);
+                return null;
+            }
+
             CaptureAnalysisOutcome outcome = analysisClient.analyze(pngBytes, repository().getLlmConfig(), repository().getCategories());
             if (!outcome.isSupported()) {
                 repository().upsertCaptureLog(captureLogFactory.createCompletedLog(captureLog, outcome, null));
@@ -97,6 +108,73 @@ public final class CaptureProcessingEngine {
             return null;
         } finally {
             captureAccount.remove();
+        }
+    }
+
+    private void processAssetCapture(byte[] pngBytes, JSONObject captureLog) {
+        String imageBase64 = Base64.encodeToString(pngBytes, Base64.NO_WRAP);
+        JSONObject analysis = assetAnalysisClient.analyze(imageBase64, repository().getLlmConfig());
+        boolean ok = analysis.optBoolean("ok", false);
+        if (!ok) {
+            String message = analysis.optString("message", "").trim();
+            String reason = message.isEmpty() ? "未识别到持仓" : message;
+            repository().upsertCaptureLog(buildAssetFailureLog(captureLog, analysis, reason));
+            updateError(reason);
+            return;
+        }
+
+        AssetScreenshotApplier.Result result = new AssetScreenshotApplier(repository()).apply(analysis.optJSONArray("holdings"));
+        String summary = result.summary == null ? "" : result.summary;
+        if (result.appliedCount == 0) {
+            repository().upsertCaptureLog(buildAssetSuccessLog(captureLog, analysis, "持仓无变化"));
+            repository().saveAutoBookkeepingSettings(statusUpdate("", System.currentTimeMillis()));
+            if (repository().isActive()) {
+                NotificationHelper.showAssetResult(appContext, "持仓无变化");
+                emitStatus();
+            }
+            return;
+        }
+
+        repository().upsertCaptureLog(buildAssetSuccessLog(captureLog, analysis, summary));
+        repository().saveAutoBookkeepingSettings(statusUpdate("", System.currentTimeMillis()));
+        if (repository().isActive()) {
+            NotificationHelper.showAssetResult(appContext, summary);
+            // 资产入账不是交易，复用 captureRecorded 仅为触发前端刷新快照（监听器忽略 payload）。
+            ScreenCaptureBookkeepingPlugin.emitCaptureRecorded(new JSONObject());
+            emitStatus();
+        }
+    }
+
+    private JSONObject buildAssetSuccessLog(JSONObject pendingLog, JSONObject analysis, String summary) {
+        JSONObject log = cloneLog(pendingLog);
+        safePut(log, "status", "success");
+        safePut(log, "failureStage", "");
+        safePut(log, "failureReason", "");
+        safePut(log, "summary", summary);
+        safePut(log, "assistantReplyRaw", analysis.optString("assistantReplyRaw", ""));
+        safePut(log, "responseBodyRaw", analysis.optString("responseBodyRaw", ""));
+        return log;
+    }
+
+    private JSONObject buildAssetFailureLog(JSONObject pendingLog, JSONObject analysis, String reason) {
+        JSONObject log = cloneLog(pendingLog);
+        safePut(log, "status", "failed");
+        safePut(log, "failureStage", analysis.optString("failureStage", "validation"));
+        safePut(log, "failureReason", reason);
+        safePut(log, "summary", reason);
+        safePut(log, "assistantReplyRaw", analysis.optString("assistantReplyRaw", ""));
+        safePut(log, "responseBodyRaw", analysis.optString("responseBodyRaw", ""));
+        return log;
+    }
+
+    private JSONObject cloneLog(JSONObject source) {
+        if (source == null) {
+            return new JSONObject();
+        }
+        try {
+            return new JSONObject(source.toString());
+        } catch (JSONException ignored) {
+            return new JSONObject();
         }
     }
 

@@ -135,6 +135,42 @@ public class WalletRepository {
         }
     }
 
+    /**
+     * 原子应用截图识别出的资产变化：持仓与交易记录在同一次快照保存中写入。
+     * holdingUpserts：需要新建或更新的持仓对象；tradeRecordInserts：需要追加的交易记录。
+     */
+    public JSONObject applyAssetChanges(JSONArray holdingUpserts, JSONArray tradeRecordInserts) {
+        synchronized (lock) {
+            JSONObject store = readStoreLocked();
+            JSONArray holdings = store.optJSONArray("assetHoldings");
+            if (holdingUpserts != null) {
+                for (int index = 0; index < holdingUpserts.length(); index++) {
+                    JSONObject holding = holdingUpserts.optJSONObject(index);
+                    if (holding == null) {
+                        continue;
+                    }
+                    holdings = upsertById(holdings, normalizeAssetHolding(holding), true);
+                }
+            }
+            safePut(store, "assetHoldings", holdings);
+
+            JSONArray tradeRecords = store.optJSONArray("assetTradeRecords");
+            if (tradeRecordInserts != null) {
+                for (int index = 0; index < tradeRecordInserts.length(); index++) {
+                    JSONObject record = tradeRecordInserts.optJSONObject(index);
+                    if (record == null) {
+                        continue;
+                    }
+                    tradeRecords = upsertById(tradeRecords, normalizeAssetTradeRecord(record), true);
+                }
+            }
+            safePut(store, "assetTradeRecords", tradeRecords);
+
+            writeStoreLocked(store);
+            return cloneObject(store);
+        }
+    }
+
     public JSONObject deleteAssetHolding(String id) {
         synchronized (lock) {
             JSONObject store = readStoreLocked();
@@ -309,6 +345,23 @@ public class WalletRepository {
                 normalized.put("createdAt", now);
             }
             normalized.put("updatedAt", now);
+        } catch (JSONException ignored) {}
+        return normalized;
+    }
+
+    private JSONObject normalizeAssetTradeRecord(JSONObject assetTradeRecord) {
+        JSONObject normalized = cloneObject(assetTradeRecord);
+        String now = nowIsoString();
+        try {
+            if (!normalized.has("id") || normalized.optString("id").isEmpty()) {
+                normalized.put("id", UUID.randomUUID().toString());
+            }
+            if (!normalized.has("createdAt") || normalized.optString("createdAt").isEmpty()) {
+                normalized.put("createdAt", now);
+            }
+            if (!normalized.has("occurredAt") || normalized.optString("occurredAt").isEmpty()) {
+                normalized.put("occurredAt", now);
+            }
         } catch (JSONException ignored) {}
         return normalized;
     }

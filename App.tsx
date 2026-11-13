@@ -609,6 +609,11 @@ const App: React.FC = () => {
     if (match?.[1]) {
       setPendingEditTransactionId(decodeURIComponent(match[1]));
       setActiveTab(AppTab.DASHBOARD);
+      return;
+    }
+
+    if (/^smartwallet:\/\/assets\/?$/i.test(url)) {
+      setActiveTab(AppTab.ANALYSIS);
     }
   }, []);
 

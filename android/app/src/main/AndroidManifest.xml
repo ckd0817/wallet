@@ -58,6 +58,9 @@
                     android:host="transaction"
                     android:pathPattern="/.*/edit"
                     android:scheme="smartwallet" />
+                <data
+                    android:host="assets"
+                    android:scheme="smartwallet" />
             </intent-filter>
 
         </activity>
