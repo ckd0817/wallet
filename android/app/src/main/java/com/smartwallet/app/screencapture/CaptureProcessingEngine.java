@@ -87,6 +87,8 @@ public final class CaptureProcessingEngine {
             }
 
             CaptureAnalysisOutcome outcome = analysisClient.resolveBookkeepingOutcome(
+                combined.content,
+                combined.assistantReply,
                 combined.responseBody,
                 combined.httpStatus,
                 repository().getCategories()

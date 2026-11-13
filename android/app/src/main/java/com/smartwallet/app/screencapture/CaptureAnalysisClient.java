@@ -119,10 +119,16 @@ public class CaptureAnalysisClient {
     }
 
     /**
-     * 将已收到的记账响应解析为交易结果并映射分类，不再发起网络请求。
+     * 将已解析的记账内容构造为交易结果并映射分类，复用已有解析结果，不再解析或发起网络请求。
      */
-    public CaptureAnalysisOutcome resolveBookkeepingOutcome(String responseBody, int httpStatus, JSONArray categories) {
-        CaptureAnalysisOutcome outcome = CaptureAnalysisParser.parseChatResponse(responseBody)
+    public CaptureAnalysisOutcome resolveBookkeepingOutcome(
+        JSONObject content,
+        String assistantReply,
+        String responseBody,
+        int httpStatus,
+        JSONArray categories
+    ) {
+        CaptureAnalysisOutcome outcome = CaptureAnalysisParser.parseBookkeepingContent(content, assistantReply, responseBody)
             .withHttpStatus(httpStatus)
             .withResponseBodyRaw(responseBody);
 

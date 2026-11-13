@@ -50,51 +50,7 @@ public final class CaptureAnalysisParser {
                 );
             }
 
-            String transactionType = parsed.optString("transactionType", "").trim().toLowerCase();
-            double amount = parsed.has("amount") ? parsed.optDouble("amount", 0d) : 0d;
-
-            if (!"expense".equals(transactionType) && !"income".equals(transactionType)) {
-                return buildFailureOutcome(
-                    responseBody,
-                    content,
-                    parsed,
-                    "validation",
-                    "识别结果不是收入或支出类型",
-                    CaptureAnalysisResult.unsupported("识别结果不是收入或支出类型")
-                );
-            }
-
-            if (amount <= 0d) {
-                return buildFailureOutcome(
-                    responseBody,
-                    content,
-                    parsed,
-                    "validation",
-                    "未识别出有效金额",
-                    CaptureAnalysisResult.unsupported("未识别出有效金额")
-                );
-            }
-
-            return new CaptureAnalysisOutcome(
-                new CaptureAnalysisResult(
-                    true,
-                    transactionType,
-                    amount,
-                    parsed.optString("merchantName", ""),
-                    parsed.optString("occurredAt", ""),
-                    parsed.optString("categoryId", parsed.optString("categoryName", "")),
-                    parsed.optString("note", parsed.optString("summary", "")),
-                    parsed.optString("pickupCode", ""),
-                    parsed.optString("summary", ""),
-                    ""
-                ),
-                0,
-                responseBody,
-                content,
-                parsed,
-                "",
-                ""
-            );
+            return parseBookkeepingContent(parsed, content, responseBody);
         } catch (Exception ignored) {
             return buildFailureOutcome(
                 responseBody,
@@ -105,6 +61,69 @@ public final class CaptureAnalysisParser {
                 CaptureAnalysisResult.unsupported("模型未返回可解析结果")
             );
         }
+    }
+
+    /**
+     * 校验并构造记账结果。parsed 为已从响应里提取并解析好的 JSON 内容，
+     * assistantReply/responseBody 仅用于日志回溯；允许复用已解析对象，不重复解析。
+     */
+    public static CaptureAnalysisOutcome parseBookkeepingContent(JSONObject parsed, String assistantReply, String responseBody) {
+        if (parsed == null) {
+            return buildFailureOutcome(
+                responseBody,
+                assistantReply,
+                null,
+                "json_parse",
+                "模型未返回可解析结果",
+                CaptureAnalysisResult.unsupported("模型未返回可解析结果")
+            );
+        }
+
+        String transactionType = parsed.optString("transactionType", "").trim().toLowerCase();
+        double amount = parsed.has("amount") ? parsed.optDouble("amount", 0d) : 0d;
+
+        if (!"expense".equals(transactionType) && !"income".equals(transactionType)) {
+            return buildFailureOutcome(
+                responseBody,
+                assistantReply,
+                parsed,
+                "validation",
+                "识别结果不是收入或支出类型",
+                CaptureAnalysisResult.unsupported("识别结果不是收入或支出类型")
+            );
+        }
+
+        if (amount <= 0d) {
+            return buildFailureOutcome(
+                responseBody,
+                assistantReply,
+                parsed,
+                "validation",
+                "未识别出有效金额",
+                CaptureAnalysisResult.unsupported("未识别出有效金额")
+            );
+        }
+
+        return new CaptureAnalysisOutcome(
+            new CaptureAnalysisResult(
+                true,
+                transactionType,
+                amount,
+                parsed.optString("merchantName", ""),
+                parsed.optString("occurredAt", ""),
+                parsed.optString("categoryId", parsed.optString("categoryName", "")),
+                parsed.optString("note", parsed.optString("summary", "")),
+                parsed.optString("pickupCode", ""),
+                parsed.optString("summary", ""),
+                ""
+            ),
+            0,
+            responseBody,
+            assistantReply,
+            parsed,
+            "",
+            ""
+        );
     }
 
     public static String extractAssistantReply(String responseBody) {
