@@ -15,6 +15,7 @@ import {
   normalizeAssetCode,
   normalizeAssetHolding,
   normalizeAssetImportCandidate,
+  planAssetScreenshotChanges,
   parseEastmoneyFundQuoteResponse,
   parseFundQuoteResponse,
   parseSinaFundQuoteResponse,
@@ -737,5 +738,51 @@ describe('weekly asset data', () => {
       '2026-11-06',
     );
     expect(withWeekly[0].dailyProfit).toBe(99);
+  });
+});
+
+describe('planAssetScreenshotChanges', () => {
+  const holding = (over: Partial<Parameters<typeof planAssetScreenshotChanges>[0][number]>) => ({
+    id: 'h1', assetType: 'fund' as const, code: '000001', market: 'fund' as const, currency: 'CNY' as const,
+    name: '基金A', shares: 100, costAmount: 1000, createdAt: '2026-01-01', updatedAt: '2026-01-01', ...over,
+  });
+  const candidate = (over: Record<string, unknown>) =>
+    normalizeAssetImportCandidate({ assetType: 'fund', code: '000001', name: '基金A', ...over })!;
+
+  it('新资产生成 create', () => {
+    const changes = planAssetScreenshotChanges([], [candidate({ shares: 50, costAmount: 500 })]);
+    expect(changes).toHaveLength(1);
+    expect(changes[0]).toMatchObject({ type: 'create', deltaShares: 50, nextShares: 50, nextCost: 500 });
+    expect(changes[0].price).toBeCloseTo(10);
+  });
+
+  it('份额增加判定为 buy 并用成本差推算成交价', () => {
+    const changes = planAssetScreenshotChanges([holding({})], [candidate({ shares: 150, costAmount: 1600 })]);
+    expect(changes[0]).toMatchObject({ type: 'buy', deltaShares: 50, nextShares: 150, nextCost: 1600 });
+    expect(changes[0].price).toBeCloseTo(12); // (1600-1000)/50
+    expect(changes[0].tradeAmount).toBeCloseTo(600);
+  });
+
+  it('份额减少判定为 sell 并用成本差推算成交价', () => {
+    const changes = planAssetScreenshotChanges([holding({})], [candidate({ shares: 60, costAmount: 600 })]);
+    expect(changes[0]).toMatchObject({ type: 'sell', deltaShares: -40, nextShares: 60, nextCost: 600 });
+    expect(changes[0].price).toBeCloseTo(10); // (1000-600)/40
+    expect(changes[0].tradeAmount).toBeCloseTo(400);
+  });
+
+  it('份额不变但成本变化判定为 cost', () => {
+    const changes = planAssetScreenshotChanges([holding({})], [candidate({ shares: 100, costAmount: 1200 })]);
+    expect(changes[0]).toMatchObject({ type: 'cost', deltaShares: 0, nextShares: 100, nextCost: 1200 });
+  });
+
+  it('份额与成本都不变判定为 unchanged', () => {
+    const changes = planAssetScreenshotChanges([holding({})], [candidate({ shares: 100, costAmount: 1000 })]);
+    expect(changes[0].type).toBe('unchanged');
+  });
+
+  it('成本缺失时回退到平均成本推算成交价', () => {
+    const changes = planAssetScreenshotChanges([holding({})], [candidate({ shares: 150, costAmount: 0 })]);
+    expect(changes[0].type).toBe('buy');
+    expect(changes[0].price).toBeCloseTo(10); // avgCost=1000/100
   });
 });

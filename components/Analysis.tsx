@@ -1,4 +1,3 @@
-import { resolveAssetTradeQuantity } from '../services/assetTradeQuantity';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { CalendarClock, Camera, Plus, ReceiptText, Trash2, X } from 'lucide-react';
@@ -18,7 +17,6 @@ import {
 import {
   AssetHolding,
   AssetCurrency,
-  AssetImportCandidate,
   AssetPerformanceSnapshot,
   AssetQuote,
   AssetRecurringFrequency,
@@ -43,7 +41,6 @@ import {
   getLastCompletedWeekEnd,
   mergeAssetHoldingDistribution,
   normalizeAssetCode,
-  normalizeAssetImportCandidate,
 } from '../services/assetEngine';
 import { calculateWealthFreedom } from '../services/wealthFreedom';
 
@@ -67,7 +64,7 @@ interface AnalysisProps {
   onDeleteAssetRecurringPlan: (id: string) => Promise<void> | void;
   onSyncAssetQuotes: () => Promise<void> | void;
   onFetchTradeQuote: (holding: AssetHolding) => Promise<AssetQuote | null>;
-  onAnalyzeAssetScreenshot: (imageBase64: string) => Promise<AssetImportCandidate[]>;
+  onAnalyzeAssetScreenshot: (imageBase64: string) => Promise<{ summary: string; appliedCount: number }>;
 }
 
 type AssetFormState = {
@@ -79,6 +76,47 @@ type AssetFormState = {
 };
 
 type AssetOperationType = 'buy' | 'sell';
+type TradeInputField = 'amount' | 'shares' | 'price';
+
+const formatTradeNumber = (value: number) => {
+  if (!Number.isFinite(value) || value <= 0) {
+    return '';
+  }
+  return String(Number(value.toPrecision(10)));
+};
+
+const readPositiveInput = (value: string) => {
+  const amount = Number(value);
+  return value.trim() && Number.isFinite(amount) && amount > 0 ? amount : Number.NaN;
+};
+
+// 加减仓金额/份额/成交价三栏联动：以最近编辑的两个字段为输入，自动算出第三个（amount = shares × price）
+export const linkTradeInputs = (
+  values: { amount: string; shares: string; price: string },
+  edited: TradeInputField,
+  order: TradeInputField[],
+) => {
+  const partner = order.find((field) => field !== edited);
+  if (!partner) {
+    return values;
+  }
+  const third = (['amount', 'shares', 'price'] as TradeInputField[]).find((field) => field !== edited && field !== partner);
+  if (!third) {
+    return values;
+  }
+  const amount = readPositiveInput(values.amount);
+  const shares = readPositiveInput(values.shares);
+  const price = readPositiveInput(values.price);
+  const next = { ...values };
+  if (third === 'amount' && !Number.isNaN(shares) && !Number.isNaN(price)) {
+    next.amount = formatTradeNumber(shares * price);
+  } else if (third === 'shares' && !Number.isNaN(amount) && !Number.isNaN(price)) {
+    next.shares = formatTradeNumber(amount / price);
+  } else if (third === 'price' && !Number.isNaN(amount) && !Number.isNaN(shares)) {
+    next.price = formatTradeNumber(amount / shares);
+  }
+  return next;
+};
 
 const emptyForm: AssetFormState = {
   assetKind: 'fund',
@@ -140,11 +178,13 @@ const Analysis: React.FC<AnalysisProps> = ({
   const [isTradeRecordsOpen, setIsTradeRecordsOpen] = useState(false);
   const [isRecurringManagerOpen, setIsRecurringManagerOpen] = useState(false);
   const [isAnalyzingImage, setIsAnalyzingImage] = useState(false);
-  const [importCandidates, setImportCandidates] = useState<AssetImportCandidate[]>([]);
+  const [screenshotResult, setScreenshotResult] = useState('');
   const [operationType, setOperationType] = useState<AssetOperationType>('buy');
   const [operationAmount, setOperationAmount] = useState('');
-  const [operationUnit, setOperationUnit] = useState<'amount' | 'shares'>('amount');
   const [operationShares, setOperationShares] = useState('');
+  const [operationPrice, setOperationPrice] = useState('');
+  const [priceEdited, setPriceEdited] = useState(false);
+  const tradeInputOrder = useRef<TradeInputField[]>(['price']);
   const [recurringAmount, setRecurringAmount] = useState('');
   const [recurringFrequency, setRecurringFrequency] = useState<AssetRecurringFrequency>('monthly');
   const [recurringNextDate, setRecurringNextDate] = useState(new Date().toISOString().split('T')[0]);
@@ -218,6 +258,13 @@ const Analysis: React.FC<AnalysisProps> = ({
     setRecurringFrequency(existingPlan?.frequency ?? 'monthly');
     setRecurringNextDate(existingPlan?.nextDueDate ?? new Date().toISOString().split('T')[0]);
     setRecurringEnabled(existingPlan?.enabled ?? false);
+    const cachedPrice = positions.find((position) => position.holding.id === holding.id)?.quote?.price ?? 0;
+    setOperationType('buy');
+    setOperationAmount('');
+    setOperationShares('');
+    setOperationPrice(formatTradeNumber(cachedPrice));
+    setPriceEdited(false);
+    tradeInputOrder.current = ['price'];
     setIsFormOpen(true);
   };
 
@@ -229,8 +276,10 @@ const Analysis: React.FC<AnalysisProps> = ({
     setForm(emptyForm);
     setOperationType('buy');
     setOperationAmount('');
-    setOperationUnit('amount');
     setOperationShares('');
+    setOperationPrice('');
+    setPriceEdited(false);
+    tradeInputOrder.current = ['price'];
     setRecurringAmount('');
     setRecurringFrequency('monthly');
     setRecurringNextDate(new Date().toISOString().split('T')[0]);
@@ -268,9 +317,27 @@ const Analysis: React.FC<AnalysisProps> = ({
     };
   };
 
-  const operationValue = operationUnit === 'shares' ? operationShares : operationAmount;
+  const applyTradeInput = (field: TradeInputField, value: string) => {
+    if (field === 'amount') setOperationAmount(value);
+    else if (field === 'shares') setOperationShares(value);
+    else { setOperationPrice(value); setPriceEdited(true); }
+    const order = [field, ...tradeInputOrder.current.filter((item) => item !== field)].slice(0, 2);
+    tradeInputOrder.current = order;
+    const current = {
+      amount: field === 'amount' ? value : operationAmount,
+      shares: field === 'shares' ? value : operationShares,
+      price: field === 'price' ? value : operationPrice,
+    };
+    const next = linkTradeInputs(current, field, order);
+    if (next.amount !== current.amount) setOperationAmount(next.amount);
+    if (next.shares !== current.shares) setOperationShares(next.shares);
+    if (next.price !== current.price) setOperationPrice(next.price);
+  };
+
+  const operationValue = operationShares.trim() || operationAmount.trim();
   const draftKey = JSON.stringify({ assetKind: form.assetKind, code: form.code, shares: form.shares,
-    costAmount: Number(buildPayload().costAmount.toPrecision(12)), operationType: operationValue.trim() ? operationType : '', operationUnit: operationValue.trim() ? operationUnit : '', operationValue,
+    costAmount: Number(buildPayload().costAmount.toPrecision(12)), operationType: operationValue ? operationType : '',
+    operationAmount, operationShares, operationPrice,
     recurringAmount, recurringFrequency, recurringNextDate, recurringEnabled, deletePlan });
   useEffect(() => {
     if (isFormOpen && !initialDraft.current) initialDraft.current = draftKey;
@@ -330,44 +397,38 @@ const Analysis: React.FC<AnalysisProps> = ({
       }
     }
     let trade: Omit<AssetTradeRecord, 'id' | 'createdAt'> | undefined;
-    if (editingHolding && operationValue.trim()) {
-      const value = Number(operationValue);
-      if (!Number.isFinite(value) || value <= 0) { alert(operationUnit === 'shares' ? '请输入份额' : '请输入金额'); return; }
+    if (editingHolding && operationValue) {
       const cachedQuote = positions.find(position => position.holding.id === editingId)?.quote;
       const delayed = isDelayedSettlementFund({ ...editingHolding, name: cachedQuote?.name || editingHolding.name });
-      let quote = cachedQuote;
-      if (!delayed) {
-        savingRef.current = true;
-        setIsSaving(true);
-        try { quote = (await onFetchTradeQuote(editingHolding)) ?? undefined; }
-        catch { quote = undefined; }
-        finally { savingRef.current = false; setIsSaving(false); }
-      }
-      const price = quote?.price ?? 0;
-      const amount = operationUnit === 'shares' ? (delayed ? 0 : value * price) : value;
-      if (operationType === 'sell' && operationUnit === 'shares' && value > payload.shares) {
-        alert('份额不足'); return;
-      }
-      if (operationType === 'sell' && operationUnit === 'amount' && (!(price > 0) || amount > payload.shares * price)) {
-        alert(price > 0 ? '金额超出持仓' : '暂无成交价'); return;
-      }
       const now = new Date().toISOString();
-      trade = { holdingId: editingId, assetType: payload.assetType, code: payload.code,
-        name: quote?.name || payload.name, currency: getAssetCurrency(editingHolding),
-        tradeType: operationType, source: 'manual', status: delayed ? 'pending' : 'completed',
-        inputMode: operationUnit, shares: operationUnit === 'shares' ? value : 0, amount, price: 0, occurredAt: now };
-      if (!delayed) {
-        if (!Number.isFinite(price) || price <= 0) { alert('暂无成交价'); return; }
-        let quantity: ReturnType<typeof resolveAssetTradeQuantity>;
-        try { quantity = resolveAssetTradeQuantity(operationUnit, value, price); }
-        catch (error) { alert(error instanceof Error ? error.message : '请检查交易数量'); return; }
-        const delta = quantity.shares;
-        const nextShares = operationType === 'sell' ? Math.max(0, payload.shares - delta) : payload.shares + delta;
+      if (delayed) {
+        // 延迟确认基金：价格待确认，按金额或份额记待成交
+        const inputMode: 'amount' | 'shares' = operationShares.trim() ? 'shares' : 'amount';
+        const value = Number(inputMode === 'shares' ? operationShares : operationAmount);
+        if (!Number.isFinite(value) || value <= 0) { alert(inputMode === 'shares' ? '请输入份额' : '请输入金额'); return; }
+        if (operationType === 'sell' && inputMode === 'shares' && value > payload.shares) { alert('份额不足'); return; }
+        trade = { holdingId: editingId, assetType: payload.assetType, code: payload.code,
+          name: cachedQuote?.name || payload.name, currency: getAssetCurrency(editingHolding),
+          tradeType: operationType, source: 'manual', status: 'pending',
+          inputMode, shares: inputMode === 'shares' ? value : 0, amount: inputMode === 'amount' ? value : 0, price: 0, occurredAt: now };
+      } else {
+        const shares = Number(operationShares);
+        const price = Number(operationPrice);
+        const amount = Number(operationAmount);
+        if (!Number.isFinite(price) || price <= 0) { alert('请输入成交价'); return; }
+        if (!Number.isFinite(shares) || shares <= 0) { alert('请输入份额或金额'); return; }
+        if (!Number.isFinite(amount) || amount <= 0) { alert('请检查金额'); return; }
+        if (operationType === 'sell' && shares > payload.shares) { alert('份额不足'); return; }
+        const nextShares = operationType === 'sell' ? Math.max(0, payload.shares - shares) : payload.shares + shares;
         const nextCost = operationType === 'sell'
           ? (nextShares === 0 ? 0 : payload.costAmount * nextShares / payload.shares)
           : payload.costAmount + amount;
         payload = { ...payload, shares: nextShares, costAmount: nextCost };
-        trade = { ...trade, shares: delta, price, priceSource: quote?.priceSource ?? 'manual', settledAt: now };
+        trade = { holdingId: editingId, assetType: payload.assetType, code: payload.code,
+          name: cachedQuote?.name || payload.name, currency: getAssetCurrency(editingHolding),
+          tradeType: operationType, source: 'manual', status: 'completed',
+          inputMode: operationShares.trim() ? 'shares' : 'amount', shares, amount, price,
+          priceSource: priceEdited ? 'manual' : (cachedQuote?.priceSource ?? 'manual'), occurredAt: now, settledAt: now };
       }
     }
     savingRef.current = true;
@@ -402,10 +463,11 @@ const Analysis: React.FC<AnalysisProps> = ({
     setIsAnalyzingImage(true);
     try {
       const imageBase64 = await readFileAsBase64(file);
-      const candidates = await onAnalyzeAssetScreenshot(imageBase64);
-      setImportCandidates(candidates.map(normalizeAssetImportCandidate).filter((item): item is AssetImportCandidate => Boolean(item)));
-      if (candidates.length === 0) {
-        alert('未识别到持仓');
+      const { summary, appliedCount } = await onAnalyzeAssetScreenshot(imageBase64);
+      if (appliedCount === 0) {
+        alert('未识别到变化');
+      } else {
+        setScreenshotResult(summary);
       }
     } catch (error) {
       alert(error instanceof Error ? error.message : '识别失败');
@@ -415,19 +477,6 @@ const Analysis: React.FC<AnalysisProps> = ({
         fileInputRef.current.value = '';
       }
     }
-  };
-
-  const importCandidate = async (candidate: AssetImportCandidate) => {
-    await onAddAssetHolding({
-      assetType: candidate.assetType,
-      code: candidate.code,
-      market: candidate.market,
-      currency: getAssetCurrency(candidate),
-      name: candidate.name,
-      shares: candidate.shares,
-      costAmount: candidate.costAmount,
-    });
-    setImportCandidates((previous) => previous.filter((item) => item !== candidate));
   };
 
   return (
@@ -506,32 +555,10 @@ const Analysis: React.FC<AnalysisProps> = ({
         </div>
       )}
 
-      {importCandidates.length > 0 && (
-        <div className="bg-white border border-border p-5 rounded-2xl space-y-4">
-          <h3 className="text-base font-semibold text-primary">识别结果</h3>
-          {importCandidates.map((candidate) => (
-            <div key={`${candidate.assetType}-${candidate.code}-${candidate.name}`} className="flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <p className="text-sm font-medium text-primary truncate">{candidate.name || candidate.code}</p>
-                <p className="text-xs text-secondary">
-                  {formatAssetKind(candidate)} · {candidate.code}
-                  {' · '}
-                  {candidate.shares.toFixed(2)}份
-                </p>
-                <p className={`text-xs mt-1 ${candidate.costAmount > 0 ? 'text-secondary' : 'text-warning'}`}>
-                  {candidate.costAmount > 0
-                    ? `总成本 ${formatAssetMoney(candidate.costAmount, getAssetCurrency(candidate))} · ${formatCostSource(candidate.costSource)}`
-                    : '成本待补'}
-                </p>
-              </div>
-              <button
-                onClick={() => importCandidate(candidate)}
-                className="px-3 py-1.5 rounded-lg bg-primary text-white text-xs font-semibold"
-              >
-                导入
-              </button>
-            </div>
-          ))}
+      {screenshotResult && !isAnalyzingImage && (
+        <div className="flex items-center justify-between gap-3 rounded-2xl border border-border bg-surface px-4 py-3">
+          <p className="text-sm text-primary">{screenshotResult}</p>
+          <button onClick={() => setScreenshotResult('')} className="text-xs text-secondary">知道了</button>
         </div>
       )}
 
@@ -670,15 +697,27 @@ const Analysis: React.FC<AnalysisProps> = ({
                       </button>
                     ))}
                   </div>
-                  <SegmentedControl value={operationUnit} options={[{ value: 'amount', label: '金额' }, { value: 'shares', label: '份额' }]}
-                    onChange={value => setOperationUnit(value as 'amount' | 'shares')} />
-                  <Field
-                    label={`${operationType === 'sell' ? '减仓' : '加仓'}${operationUnit === 'shares' ? '份额' : `金额（${getAssetCurrency(editingHolding) === 'USD' ? '美元' : '人民币'}）`}`}
-                    value={operationValue}
-                    onChange={operationUnit === 'shares' ? setOperationShares : setOperationAmount}
-                    inputMode="decimal"
-                  />
-
+                  <div className="grid grid-cols-3 gap-2">
+                    <Field
+                      label={`金额（${getAssetCurrency(editingHolding) === 'USD' ? '美元' : '人民币'}）`}
+                      value={operationAmount}
+                      onChange={(value) => applyTradeInput('amount', value)}
+                      inputMode="decimal"
+                    />
+                    <Field
+                      label="份额"
+                      value={operationShares}
+                      onChange={(value) => applyTradeInput('shares', value)}
+                      inputMode="decimal"
+                    />
+                    <Field
+                      label="成交价"
+                      value={operationPrice}
+                      onChange={(value) => applyTradeInput('price', value)}
+                      inputMode="decimal"
+                    />
+                  </div>
+                  <p className="text-[11px] text-secondary">成交价默认带入最新行情，填任意两项自动算出第三项</p>
                 </div>
               )}
 

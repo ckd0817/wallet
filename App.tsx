@@ -86,6 +86,9 @@ import {
   isLikelyMarketOpenForHolding,
   mergeAssetPerformanceHistory,
   mergeWeeklyAssetQuotes,
+  normalizeAssetImportCandidate,
+  planAssetScreenshotChanges,
+  summarizeAssetScreenshotChanges,
 } from './services/assetEngine';
 
 const App: React.FC = () => {
@@ -1219,7 +1222,9 @@ const App: React.FC = () => {
     await syncAssetQuotesForSnapshot(assetHoldings, buildCurrentSnapshot());
   }, [assetHoldings, buildCurrentSnapshot, syncAssetQuotesForSnapshot]);
 
-  const handleAnalyzeAssetScreenshot = async (imageBase64: string): Promise<AssetImportCandidate[]> => {
+  const handleAnalyzeAssetScreenshot = async (
+    imageBase64: string,
+  ): Promise<{ summary: string; appliedCount: number }> => {
     if (!runningInAndroid) {
       throw new Error('当前环境不支持截图识别');
     }
@@ -1228,7 +1233,101 @@ const App: React.FC = () => {
     if (!result.ok) {
       throw new Error(result.message || '识别失败');
     }
-    return result.holdings;
+
+    const candidates = result.holdings
+      .map(normalizeAssetImportCandidate)
+      .filter((item): item is AssetImportCandidate => Boolean(item));
+    const changes = planAssetScreenshotChanges(assetHoldings, candidates)
+      .filter((change) => change.type !== 'unchanged');
+    if (changes.length === 0) {
+      return { summary: '', appliedCount: 0 };
+    }
+
+    const now = new Date().toISOString();
+    const nextHoldings = [...assetHoldings];
+    const newTradeRecords: AssetTradeRecord[] = [];
+
+    for (const change of changes) {
+      if (change.type === 'create') {
+        const candidate = change.candidate;
+        const holding: AssetHolding = {
+          id: uuidv4(),
+          createdAt: now,
+          updatedAt: now,
+          assetType: candidate.assetType,
+          code: candidate.code,
+          market: candidate.market,
+          currency: getAssetCurrency(candidate),
+          name: candidate.name,
+          shares: candidate.shares,
+          costAmount: candidate.costAmount,
+        };
+        nextHoldings.unshift(holding);
+        newTradeRecords.unshift({
+          id: uuidv4(),
+          createdAt: now,
+          holdingId: holding.id,
+          assetType: holding.assetType,
+          code: holding.code,
+          name: holding.name,
+          currency: holding.currency,
+          tradeType: 'buy',
+          source: 'manual',
+          status: 'completed',
+          inputMode: 'shares',
+          shares: change.deltaShares,
+          amount: change.tradeAmount,
+          price: change.price,
+          priceSource: 'estimated',
+          occurredAt: now,
+        });
+        continue;
+      }
+
+      const index = nextHoldings.findIndex((item) => item.id === change.holdingId);
+      if (index < 0) {
+        continue;
+      }
+      const current = nextHoldings[index];
+      nextHoldings[index] = {
+        ...current,
+        name: change.name || current.name,
+        shares: change.nextShares,
+        costAmount: change.nextCost,
+        updatedAt: now,
+      };
+      if (change.type === 'buy' || change.type === 'sell') {
+        newTradeRecords.unshift({
+          id: uuidv4(),
+          createdAt: now,
+          holdingId: current.id,
+          assetType: current.assetType,
+          code: current.code,
+          name: change.name || current.name,
+          currency: getAssetCurrency(current),
+          tradeType: change.type,
+          source: 'manual',
+          status: 'completed',
+          inputMode: 'shares',
+          shares: Math.abs(change.deltaShares),
+          amount: change.tradeAmount,
+          price: change.price,
+          priceSource: 'estimated',
+          occurredAt: now,
+        });
+      }
+    }
+
+    const nextSnapshot = normalizeSnapshot({
+      ...buildCurrentSnapshot(),
+      assetHoldings: nextHoldings,
+      assetTradeRecords: [...newTradeRecords, ...assetTradeRecords],
+    });
+    const savedSnapshot = runningInAndroid ? await saveNativeSnapshot(nextSnapshot) : nextSnapshot;
+    applySnapshot(savedSnapshot);
+    void syncAssetQuotesForSnapshot(savedSnapshot.assetHoldings, savedSnapshot);
+
+    return { summary: summarizeAssetScreenshotChanges(changes), appliedCount: changes.length };
   };
 
   const handleUpdateAppSettings = async (settings: AppSettings) => {

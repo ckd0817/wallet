@@ -937,3 +937,91 @@ export const resolveAssetTotalCost = ({
 
   return { costAmount: 0, costSource: 'missing' };
 };
+
+// 截图识别自动加减仓/建仓：对比识别结果与现有持仓，得出每项变化
+export type AssetScreenshotChangeType = 'create' | 'buy' | 'sell' | 'cost' | 'unchanged';
+
+export interface AssetScreenshotChange {
+  type: AssetScreenshotChangeType;
+  candidate: AssetImportCandidate;
+  holdingId?: string;
+  name: string;
+  deltaShares: number;
+  tradeAmount: number;
+  price: number;
+  nextShares: number;
+  nextCost: number;
+}
+
+const SHARE_EPSILON = 1e-4;
+
+export const planAssetScreenshotChanges = (
+  holdings: AssetHolding[],
+  candidates: AssetImportCandidate[],
+): AssetScreenshotChange[] => {
+  const changes: AssetScreenshotChange[] = [];
+  for (const candidate of candidates) {
+    const holding = holdings.find(
+      (item) =>
+        item.assetType === candidate.assetType &&
+        item.code === candidate.code &&
+        item.market === candidate.market,
+    );
+    const newShares = normalizeAmount(candidate.shares);
+    const newCost = normalizeAmount(candidate.costAmount);
+    if (!holding) {
+      if (newShares > 0) {
+        changes.push({
+          type: 'create',
+          candidate,
+          name: candidate.name,
+          deltaShares: newShares,
+          tradeAmount: newCost,
+          price: newCost / newShares,
+          nextShares: newShares,
+          nextCost: newCost,
+        });
+      }
+      continue;
+    }
+    const delta = newShares - holding.shares;
+    const name = candidate.name || holding.name;
+    const avgCost = holding.shares > 0 ? holding.costAmount / holding.shares : 0;
+    if (Math.abs(delta) <= SHARE_EPSILON) {
+      if (newCost > 0 && Math.abs(newCost - holding.costAmount) > 0.01) {
+        changes.push({ type: 'cost', candidate, holdingId: holding.id, name, deltaShares: 0, tradeAmount: 0, price: 0, nextShares: holding.shares, nextCost: newCost });
+      } else {
+        changes.push({ type: 'unchanged', candidate, holdingId: holding.id, name, deltaShares: 0, tradeAmount: 0, price: 0, nextShares: holding.shares, nextCost: holding.costAmount });
+      }
+      continue;
+    }
+    if (delta > 0) {
+      const addedShares = delta;
+      const costChange = newCost - holding.costAmount;
+      const price = costChange > 0 ? costChange / addedShares : avgCost;
+      const tradeAmount = price * addedShares;
+      changes.push({ type: 'buy', candidate, holdingId: holding.id, name, deltaShares: addedShares, tradeAmount, price, nextShares: newShares, nextCost: newCost });
+    } else {
+      const soldShares = -delta;
+      const costChange = holding.costAmount - newCost;
+      const price = costChange > 0 ? costChange / soldShares : avgCost;
+      const tradeAmount = price * soldShares;
+      changes.push({ type: 'sell', candidate, holdingId: holding.id, name, deltaShares: -soldShares, tradeAmount, price, nextShares: newShares, nextCost: Math.max(0, newCost) });
+    }
+  }
+  return changes;
+};
+
+// 生成产品化的应用结果文案（简短、状态化）
+export const summarizeAssetScreenshotChanges = (changes: AssetScreenshotChange[]): string => {
+  const created = changes.filter((item) => item.type === 'create').length;
+  const bought = changes.filter((item) => item.type === 'buy').length;
+  const sold = changes.filter((item) => item.type === 'sell').length;
+  const adjusted = changes.filter((item) => item.type === 'cost').length;
+  const parts: string[] = [];
+  if (created > 0) parts.push(`新建 ${created} 项`);
+  if (bought > 0) parts.push(`加仓 ${bought} 项`);
+  if (sold > 0) parts.push(`减仓 ${sold} 项`);
+  if (adjusted > 0) parts.push(`更新成本 ${adjusted} 项`);
+  return parts.join('　');
+};
